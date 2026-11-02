@@ -76,7 +76,7 @@ Each event is a `POST` to `CALLBACK_URL` with `Authorization: Bearer <CALLBACK_T
 | `timestamp` | ISO 8601, UTC |
 | `script_version` | The installer's commit |
 | `sequence` | Monotonic across runs, so the receiver can order and de-duplicate |
-| `exit_code`, `log_tail` | On `failed` only: the exit code and the last 50 lines of the log, with secret values replaced by `[REDACTED]` |
+| `exit_code`, `log_tail` | On `failed` only: the exit code and the end of the log (at most 50 lines and 12,000 bytes), with secret values replaced by `[REDACTED]` and control and non-ASCII characters removed |
 
 ## Phases
 
@@ -119,16 +119,18 @@ The local image is tagged `openclaw-kali:<hash>`, where the hash covers the base
 
 ## Error handling and resilience
 
-- `set -Eeuo pipefail` throughout. The `ERR` trap records the failing command and line; the `EXIT` trap posts exactly one `failed` event when the exit code is not 0, and nothing on success. `INT` and `TERM` become exits 130 and 143 and go through the same path.
+- `set -Eeuo pipefail` throughout. The `ERR` trap records the failing command and line; the `EXIT` trap posts exactly one `failed` event when the exit code is not 0, and nothing on success. Its message carries the reason given to `die`. `INT` and `TERM` become exits 130 and 143 and go through the same path; `tee` ignores those signals, so a signal sent to the whole process group (as `timeout` and systemd do) still produces the event.
+- As soon as `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are valid, any later failure is reported, including other invalid parameters, an unsupported distro or a missing root, so the client sees the reason instead of a timeout. A dry run never posts.
+- Events are built in bash rather than with `jq`, so the first event works before preflight installs anything.
 - **Lock:** `/run/openclaw-install.lock`, a directory created atomically, holding the owner's pid. A second run is refused and posts nothing (a `failed` event would end the deployment the first run is still installing). A lock whose pid is gone is taken over.
-- **State:** `/var/lib/openclaw-install/` (`0700`) records completed phases and a hash of the non-secret parameters. A re-run skips completed phases; changed parameters redo all of them; a rotated secret does not. Verify always runs.
+- **State:** `/var/lib/openclaw-install/` (`0700`) records each completed phase with a hash of that phase's own inputs: `INSTALL_USER` for all of them, plus `OPENCLAW_VERSION` and `LLM_AUTH_CHOICE` for openclaw, and `KALI_IMAGE` and `KALI_PACKAGES` for kali. A re-run skips completed phases whose inputs are unchanged, so a corrected `KALI_IMAGE` redoes only kali; a new `JOB_ID`, `CALLBACK_URL` or secret redoes nothing. Skipped phases still report their percentage. Verify always runs.
 - **Idempotence:** every phase is safe to repeat: packages are installed only if missing, Docker only if absent or stopped, OpenClaw only if not at the pin, the Kali image only if its tag is missing, and the metadata rules only if absent.
 
 ## Security
 
 - OpenClaw runs as `INSTALL_USER`, a dedicated non-root system user, under a system-level systemd unit.
 - `OPENCLAW_VERSION` pins the install; the official installer is fetched over HTTPS only.
-- **Secrets** (`CALLBACK_TOKEN`, `LLM_API_KEY`) come from the environment only, are never passed as arguments or logged, are excluded from the state file, and are redacted from the log tail sent on failure. The provider key's only file on disk is `/etc/openclaw/openclaw.env` (root, `0600`).
+- **Secrets** (`CALLBACK_TOKEN`, `LLM_API_KEY`) come from the environment only, are unexported right after validation so no child process inherits them, are never passed as arguments or logged, are excluded from the state file, and are redacted from the log tail sent on failure. The provider key's only file on disk is `/etc/openclaw/openclaw.env` (root, `0600`).
 - **No shared platform key on the server.** The events route accepts only the per-deployment `CALLBACK_TOKEN`, which expires at the deployment's deadline.
 - **Metadata service.** user_data, which carries the secrets, stays readable from `169.254.169.254` for the server's life. `openclaw-metadata-block.service` drops that traffic from Docker containers (`DOCKER-USER` chain) and from every non-root user (`OUTPUT` with `--uid-owner`), at every boot and Docker restart. Verify fails if either can still reach it.
 - **Docker group.** The gateway's user is in the `docker` group because OpenClaw starts sandbox containers, which makes that user root-equivalent on the host. This is inherent to OpenClaw's Docker backend. The sandbox containers themselves get no Docker socket and no host directories.
