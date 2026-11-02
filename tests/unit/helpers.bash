@@ -46,3 +46,31 @@ shim_script() {
   { printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s $*" >> "$SHIM_LOG"\n' "$name"; cat; } > "$SHIM_DIR/$name"
   chmod +x "$SHIM_DIR/$name"
 }
+
+# curl_capture_shim: a fake curl for the events endpoint. It saves stdin (the
+# -K config) and the --data-binary body of each call as CALL_DIR/N.config and
+# N.body, then answers with the next code from HTTP_CODES (default 204).
+curl_capture_shim() {
+  export CALL_DIR="$BATS_TEST_TMPDIR/curl"; mkdir -p "$CALL_DIR"
+  export HTTP_CODES="${HTTP_CODES:-204}"
+  shim_script curl <<'EOF'
+n=$(( $(ls "$CALL_DIR" | wc -l) / 2 + 1 ))
+cat > "$CALL_DIR/$n.config"
+prev=""; for a in "$@"; do [[ "$prev" == --data-binary ]] && cp "${a#@}" "$CALL_DIR/$n.body"; prev="$a"; done
+codes=($HTTP_CODES); code="${codes[$((n-1))]:-${codes[-1]}}"
+[[ "$code" == fail ]] && exit 28
+printf '%s' "$code"
+EOF
+}
+
+# event N FILTER: jq FILTER applied to the Nth posted event body.
+event() { jq -r "$2" "$CALL_DIR/$1.body"; }
+
+# events: one line per posted event, "event percent phase", in posting order.
+events() {
+  local n=1
+  while [[ -f "$CALL_DIR/$n.body" ]]; do
+    jq -r '"\(.event) \(.percent) \(.phase)"' "$CALL_DIR/$n.body"
+    n=$((n + 1))
+  done
+}

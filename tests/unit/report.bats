@@ -10,18 +10,7 @@ setup() {
   validate_params
   state_init
   SCRIPT_VERSION=test-1
-  # curl shim: saves stdin (the -K config) and the --data-binary body for each
-  # call, then answers with the next code from HTTP_CODES (default 204).
-  export CALL_DIR="$BATS_TEST_TMPDIR/curl"; mkdir -p "$CALL_DIR"
-  export HTTP_CODES="${HTTP_CODES:-204}"
-  shim_script curl <<'EOF2'
-n=$(( $(ls "$CALL_DIR" | wc -l) / 2 + 1 ))
-cat > "$CALL_DIR/$n.config"
-prev=""; for a in "$@"; do [[ "$prev" == --data-binary ]] && cp "${a#@}" "$CALL_DIR/$n.body"; prev="$a"; done
-codes=($HTTP_CODES); code="${codes[$((n-1))]:-${codes[-1]}}"
-[[ "$code" == fail ]] && exit 28
-printf '%s' "$code"
-EOF2
+  curl_capture_shim
   shim sleep
 }
 
