@@ -23,9 +23,10 @@
 # Usage: tests/hetzner/run-matrix.sh [distro ...]
 #   distro: debian ubuntu rocky alma centos-stream fedora (default: all)
 #   Negative cases (bad image, resume, lock) run on the first distro.
-set -euo pipefail
+#
 # "check && pass || fail" is safe here because pass always returns 0.
 # shellcheck disable=SC2015
+set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
