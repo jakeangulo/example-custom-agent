@@ -7,24 +7,25 @@
 # user_data is readable through the Hetzner API and the metadata service for the
 # server's whole life. The installer blocks the metadata service for containers
 # and non-root users, and this script deletes its env file and cloud-init's
-# cached copies of user_data when the install ends.
+# cached copies of user_data when the install ends. Values are single-quoted
+# because the env file is sourced by bash.
 
 write_files:
   - path: /root/openclaw-install.env
     permissions: "0600"
     owner: root:root
     content: |
-      INSTALL_REPO_URL=https://gitlab.com/appyfic/example-custom-agent.git
-      INSTALL_REPO_REF=0000000000000000000000000000000000000000
-      INSTALL_SCRIPT=install.sh
-      OPENCLAW_VERSION=2026.10.2
-      KALI_IMAGE=kalilinux/kali-rolling:2025.4
-      KALI_PACKAGES=kali-linux-headless
-      CALLBACK_URL=https://receiver.example.com/deployments/demo-1/events
-      CALLBACK_TOKEN=replace-with-a-long-random-token
-      JOB_ID=demo-1
-      LLM_AUTH_CHOICE=apiKey
-      LLM_API_KEY=replace-with-the-provider-key
+      INSTALL_REPO_URL='https://gitlab.com/appyfic/example-custom-agent.git'
+      INSTALL_REPO_REF='0000000000000000000000000000000000000000'
+      INSTALL_SCRIPT='install.sh'
+      OPENCLAW_VERSION='2026.10.2'
+      KALI_IMAGE='kalilinux/kali-rolling:2025.4'
+      KALI_PACKAGES='kali-linux-headless'
+      CALLBACK_URL='https://receiver.example.com/deployments/demo-1/events'
+      CALLBACK_TOKEN='replace-with-a-long-random-token'
+      JOB_ID='demo-1'
+      LLM_AUTH_CHOICE='apiKey'
+      LLM_API_KEY='replace-with-the-provider-key'
 
 runcmd:
   - - bash
@@ -45,5 +46,8 @@ runcmd:
       rc=0
       bash "/opt/openclaw-installer/$INSTALL_SCRIPT" || rc=$?
       shred -u /root/openclaw-install.env
-      rm -f /var/lib/cloud/instances/*/user-data.txt /var/lib/cloud/instances/*/user-data.txt.i
+      # cloud-init keeps user_data (with the secrets) in several files; none is
+      # needed after first boot, and obj.pkl is rebuilt on the next boot.
+      rm -f /var/lib/cloud/instances/*/user-data.txt /var/lib/cloud/instances/*/user-data.txt.i \
+        /var/lib/cloud/instances/*/cloud-config.txt /var/lib/cloud/instances/*/obj.pkl
       exit "$rc"

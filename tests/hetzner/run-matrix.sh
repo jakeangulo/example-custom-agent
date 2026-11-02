@@ -119,19 +119,29 @@ events() { # events JOB -> JSON list
 }
 
 user_data() { # user_data JOB KALI_IMAGE -> file
-  local f="$WORK/$1.yaml"
-  sed -e "s|^      INSTALL_REPO_URL=.*|      INSTALL_REPO_URL=$GIT_URL|" \
-    -e "s|^      INSTALL_REPO_REF=.*|      INSTALL_REPO_REF=$GIT_REF|" \
-    -e "s|^      OPENCLAW_VERSION=.*|      OPENCLAW_VERSION=$OPENCLAW_VERSION|" \
-    -e "s|^      KALI_IMAGE=.*|      KALI_IMAGE=$2|" \
-    -e "s|^      KALI_PACKAGES=.*|      KALI_PACKAGES=$KALI_PACKAGES|" \
-    -e "s|^      CALLBACK_URL=.*|      CALLBACK_URL=$RECEIVER/events/$1|" \
-    -e "s|^      CALLBACK_TOKEN=.*|      CALLBACK_TOKEN=$TOKEN|" \
-    -e "s|^      JOB_ID=.*|      JOB_ID=$1|" \
-    -e "s|^      LLM_AUTH_CHOICE=.*|      LLM_AUTH_CHOICE=$LLM_AUTH_CHOICE|" \
-    -e "s|^      LLM_API_KEY=.*|      LLM_API_KEY=$LLM_API_KEY|" \
+  # The env block is regenerated with printf %q, so any character in a value
+  # (including the API key) survives being sourced; awk's ENVIRON avoids the
+  # escaping rules of sed and awk -v.
+  local f="$WORK/$1.yaml" block
+  block="$(
+    printf '      %s=%q\n' INSTALL_REPO_URL "$GIT_URL" INSTALL_REPO_REF "$GIT_REF" INSTALL_SCRIPT install.sh \
+      OPENCLAW_VERSION "$OPENCLAW_VERSION" KALI_IMAGE "$2" KALI_PACKAGES "$KALI_PACKAGES" \
+      CALLBACK_URL "$RECEIVER/events/$1" CALLBACK_TOKEN "$TOKEN" JOB_ID "$1" \
+      LLM_AUTH_CHOICE "$LLM_AUTH_CHOICE" LLM_API_KEY "$LLM_API_KEY"
+  )"
+  BLOCK="$block" awk '/^      [A-Z_]+=/ { if (!done) { print ENVIRON["BLOCK"]; done = 1 } next } { print }' \
     "$REPO/cloud-init/user-data.example.yaml" > "$f"
   echo "$f"
+}
+
+# wait_scrubbed IP: the stub deletes its env file after install.sh exits, which
+# is after the final event; wait for that before looking for leaked secrets.
+wait_scrubbed() {
+  for _ in $(seq 1 30); do
+    ssh_to "$1" test ! -e /root/openclaw-install.env && return 0
+    sleep 5
+  done
+  return 1
 }
 
 wait_final() { # wait_final JOB -> prints the final event name, or "timeout"
@@ -156,6 +166,7 @@ check_success() { # check_success JOB IP DISTRO
   ssh_to "$ip" "runuser -u openclaw -- timeout 5 bash -c '</dev/tcp/169.254.169.254/80'" 2>/dev/null &&
     fail "$name metadata reachable by openclaw" || pass "$name metadata blocked for openclaw"
   # The secrets may exist only in the env file (and the receiver).
+  wait_scrubbed "$ip" || fail "$name bootstrap env file was not removed"
   local leaks
   leaks="$(ssh_to "$ip" "grep -rlsF -e '$LLM_API_KEY' -e '$TOKEN' /etc /var/log /var/lib /home /root /opt /tmp 2>/dev/null | grep -vx /etc/openclaw/openclaw.env" || true)"
   [[ -z "$leaks" ]] && pass "$name secrets only in the env file" || fail "$name secrets found in: $leaks"
