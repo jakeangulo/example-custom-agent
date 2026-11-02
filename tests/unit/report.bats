@@ -82,3 +82,35 @@ body() { cat "$CALL_DIR/$1.body"; }
   post_event started 0 started a
   grep -q -- '--max-time 5' "$SHIM_LOG"
 }
+
+@test "events are posted on a fresh server that has no jq yet" {
+  shim jq 127
+  post_event started 0 started "Installer started"
+  rm "$SHIM_DIR/jq"
+  [ "$(body 1 | jq -r .event)" = started ]
+  [ "$(body 1 | jq -r .sequence)" = 1 ]
+}
+
+@test "a body that cannot be written posts nothing and never fails the caller" {
+  shim mktemp 1
+  run post_event started 0 started "x"
+  [ "$status" -eq 0 ]
+  ! grep -q '^curl' "$SHIM_LOG"
+  [[ "$output" == *"WARN"* ]]
+}
+
+@test "quotes, backslashes, tabs and control characters still give valid JSON" {
+  post_event failed 20 preflight $'say "hi" \\ path\tend' 1 $'line\r\n\033[31mred\033[0m\x01done "q"'
+  [ "$(body 1 | jq -r .message)" = $'say "hi" \\ path\tend' ]
+  [[ "$(body 1 | jq -r .log_tail)" == *"red"*"done \"q\""* ]]
+  ! body 1 | jq -r .log_tail | grep -q $'\033'
+}
+
+@test "the log tail is capped at 12000 bytes, keeping the end" {
+  local tail; tail="$(for i in $(seq 1 400); do printf 'line %04d %s\n' "$i" "$(printf 'x%.0s' $(seq 1 60))"; done)"
+  post_event failed 20 preflight "x" 1 "$tail"
+  local n; n="$(body 1 | jq -r .log_tail | wc -c | tr -d ' ')"
+  [ "$n" -le 12000 ]
+  [[ "$(body 1 | jq -r .log_tail)" == *"line 0400"* ]]
+  [ "$(wc -c < "$CALL_DIR/1.body" | tr -d ' ')" -le 16384 ]
+}

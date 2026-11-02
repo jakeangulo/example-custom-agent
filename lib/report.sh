@@ -13,24 +13,53 @@ redact() {
   printf '%s' "$text"
 }
 
+LOG_TAIL_MAX_BYTES=12000
+
+# json_string TEXT: TEXT as a JSON string, built without jq (which a fresh
+# server may not have yet). Control characters other than tab, CR and LF, and
+# all non-ASCII bytes, are dropped so the result is always valid JSON.
+json_string() {
+  local s
+  s="$(printf '%s' "$1" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177-\377')"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\t'/\\t}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\n'/\\n}"
+  printf '"%s"' "$s"
+}
+
+# cap_tail TEXT: the last LOG_TAIL_MAX_BYTES bytes of TEXT, from a line start.
+cap_tail() {
+  local text="$1"
+  if ((${#text} > LOG_TAIL_MAX_BYTES)); then
+    text="$(printf '%s' "$text" | tail -c "$LOG_TAIL_MAX_BYTES")"
+    text="${text#*$'\n'}"
+  fi
+  printf '%s' "$text"
+}
+
 # post_event EVENT PERCENT PHASE MESSAGE [EXIT_CODE LOG_TAIL]
 # EVENT is started | in_progress | succeeded | failed.
 post_event() {
   local event="$1" percent="$2" phase="$3" message="$4" exit_code="${5:-}" log_tail="${6:-}"
   [[ "${DRY_RUN:-false}" == true ]] && return 0
 
-  local body
-  body="$(mktemp)"
-  jq -n \
-    --arg event "$event" --argjson percent "$percent" --arg phase "$phase" \
-    --arg message "$(redact "$message")" --arg job_id "$JOB_ID" \
-    --arg hostname "$(hostname)" --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg script_version "$SCRIPT_VERSION" --argjson sequence "$(next_sequence)" \
-    --arg exit_code "$exit_code" --arg log_tail "$(redact "$log_tail")" \
-    '{event: $event, job_id: $job_id, hostname: $hostname, percent: $percent, phase: $phase,
-      message: $message, timestamp: $timestamp, script_version: $script_version, sequence: $sequence}
-     + (if $exit_code == "" then {} else {exit_code: ($exit_code | tonumber), log_tail: $log_tail} end)' \
-    > "$body"
+  local body json
+  json="{\"event\":$(json_string "$event"),\"job_id\":$(json_string "$JOB_ID")"
+  json+=",\"hostname\":$(json_string "$(hostname)"),\"percent\":$((percent))"
+  json+=",\"phase\":$(json_string "$phase"),\"message\":$(json_string "$(redact "$message")")"
+  json+=",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"script_version\":$(json_string "$SCRIPT_VERSION")"
+  json+=",\"sequence\":$(($(next_sequence)))"
+  if [[ -n "$exit_code" ]]; then
+    json+=",\"exit_code\":$((exit_code)),\"log_tail\":$(json_string "$(cap_tail "$(redact "$log_tail")")")"
+  fi
+  json+="}"
+  if ! body="$(mktemp 2>/dev/null)" || ! printf '%s\n' "$json" > "$body"; then
+    log "WARN: could not write the '$event' event body; not posted"
+    [[ -n "${body:-}" ]] && rm -f "$body"
+    return 0
+  fi
 
   local attempt code delay=1
   for attempt in 1 2 3 4; do

@@ -69,12 +69,13 @@ on_exit() {
   local rc=$?
   set +e
   trap - ERR
+  trap '' PIPE # a dead log pipe must not stop the failure report
   if ((rc != 0)) && $REPORTING && ! $FINAL_POSTED; then
     FINAL_POSTED=true
     local message="phase '$CURRENT_PHASE' failed with exit code $rc"
     [[ -n "$FAILED_CMD" ]] && message+=" at line $FAILED_LINE: $FAILED_CMD"
-    log "ERROR: $message"
     post_event failed "$LAST_PERCENT" "$CURRENT_PHASE" "$message" "$rc" "$(tail -n 50 "$LOG_FILE" 2>/dev/null)"
+    log "ERROR: $message"
   fi
   release_lock
   exit "$rc"
@@ -84,7 +85,9 @@ start_logging() {
   mkdir -p "$(dirname "$LOG_FILE")"
   touch "$LOG_FILE"
   chmod 600 "$LOG_FILE"
-  exec > >(tee -a "$LOG_FILE") 2>&1
+  # tee ignores the signals that timeout or systemd send to the whole process
+  # group, so it is still there when on_exit reports the failure.
+  exec > >(trap '' INT TERM HUP; exec tee -a "$LOG_FILE") 2>&1
 }
 
 run_phases() {

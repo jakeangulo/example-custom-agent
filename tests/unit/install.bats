@@ -158,3 +158,15 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"Usage"* ]]
 }
+
+@test "SIGTERM to the whole process group still posts a failed event" {
+  command -v perl >/dev/null || skip "perl not installed"
+  # perl puts the installer in its own process group, as timeout and systemd do.
+  HANG_PHASE=openclaw perl -e 'setpgrp(0, 0); exec @ARGV' bash "$APP/install.sh" > /dev/null 2>&1 &
+  local pid=$! i rc=0
+  for i in $(seq 1 50); do [[ -e "$BATS_TEST_TMPDIR/hanging" ]] && break; command -p sleep 0.1; done
+  kill -TERM -- "-$pid"
+  wait "$pid" || rc=$?
+  [ "$rc" -eq 143 ]
+  [ "$(events | tail -1)" = "failed 40 openclaw" ]
+}
