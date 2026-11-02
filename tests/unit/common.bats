@@ -160,14 +160,40 @@ setup() {
   ! state_is_done openclaw || false
 }
 
-@test "changing a non-secret parameter forgets completed phases" {
+@test "changing a phase's input redoes only that phase" {
   parse_args; validate_params
   state_init
-  state_mark_done preflight
+  local p; for p in preflight docker openclaw kali; do state_mark_done "$p"; done
+  export KALI_IMAGE="kalilinux/kali-rolling:2026.1"
+  parse_args; validate_params
+  state_init
+  state_is_done preflight
+  state_is_done docker
+  state_is_done openclaw
+  ! state_is_done kali || false
   export OPENCLAW_VERSION="2026.11.0"
   parse_args; validate_params
+  ! state_is_done openclaw || false
+  state_is_done docker
+}
+
+@test "changing the install user redoes every phase" {
+  parse_args; validate_params
   state_init
-  ! state_is_done preflight || false
+  local p; for p in preflight docker openclaw kali; do state_mark_done "$p"; done
+  export INSTALL_USER=agent
+  parse_args; validate_params
+  for p in preflight docker openclaw kali; do ! state_is_done "$p" || false; done
+}
+
+@test "a new job ID or callback URL keeps completed phases" {
+  parse_args; validate_params
+  state_init
+  state_mark_done kali
+  export JOB_ID="another-job" CALLBACK_URL="https://other.example.test/events"
+  parse_args; validate_params
+  state_init
+  state_is_done kali
 }
 
 @test "changing only a secret keeps completed phases" {

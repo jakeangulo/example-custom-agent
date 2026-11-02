@@ -9,7 +9,6 @@ STATE_DIR="$OCI_ROOT/var/lib/openclaw-install"
 STATE_FILE="$STATE_DIR/state"
 SEQ_FILE="$STATE_DIR/sequence"
 
-NON_SECRET_PARAMS=(OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL JOB_ID LLM_AUTH_CHOICE INSTALL_USER KALI_PACKAGES DRY_RUN)
 SUPPORTED_OS_IDS="debian ubuntu rocky almalinux centos fedora"
 
 log() {
@@ -158,29 +157,38 @@ sha256() {
   if command -v sha256sum >/dev/null; then sha256sum | cut -d' ' -f1; else shasum -a 256 | cut -d' ' -f1; fi
 }
 
-# params_hash: identifies the non-secret inputs, so a re-run with different
-# inputs redoes every phase while a rotated secret does not.
-params_hash() {
+# phase_inputs PHASE: the parameters that change what PHASE installs. A phase
+# is redone when one of them changes; IDs, URLs and secrets never redo work.
+phase_inputs() {
+  case "$1" in
+    preflight | docker) echo INSTALL_USER ;;
+    openclaw) echo INSTALL_USER OPENCLAW_VERSION LLM_AUTH_CHOICE ;;
+    kali) echo INSTALL_USER KALI_IMAGE KALI_PACKAGES ;;
+    *) echo INSTALL_USER ;;
+  esac
+}
+
+phase_hash() {
   local p
-  for p in "${NON_SECRET_PARAMS[@]}"; do printf '%s=%s\n' "$p" "${!p:-}"; done | sha256
+  for p in $(phase_inputs "$1"); do printf '%s=%s\n' "$p" "${!p:-}"; done | sha256 | cut -c1-16
 }
 
 state_init() {
   mkdir -p "$STATE_DIR"
   chmod 700 "$STATE_DIR"
-  local hash
-  hash="$(params_hash)"
-  if [[ ! -f "$STATE_FILE" ]] || [[ "$(head -n1 "$STATE_FILE")" != "params=$hash" ]]; then
-    printf 'params=%s\n' "$hash" > "$STATE_FILE"
-  fi
+  touch "$STATE_FILE"
 }
 
+# The state file holds one "done=PHASE:HASH" line per completed phase.
 state_is_done() {
-  grep -qx "done=$1" "$STATE_FILE"
+  grep -qx "done=$1:$(phase_hash "$1")" "$STATE_FILE" 2>/dev/null
 }
 
 state_mark_done() {
-  state_is_done "$1" || printf 'done=%s\n' "$1" >> "$STATE_FILE"
+  local line others
+  line="done=$1:$(phase_hash "$1")"
+  others="$(grep -v "^done=$1:" "$STATE_FILE" 2>/dev/null || true)"
+  printf '%s\n' ${others:+"$others"} "$line" > "$STATE_FILE"
 }
 
 next_sequence() {

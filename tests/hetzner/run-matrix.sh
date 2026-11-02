@@ -198,9 +198,11 @@ negative_cases() { # on one distro: bad image, resume after fixing it, lock
     fail "a concurrent run was not refused"
   fi
   wait "$first" || true
-  local phases
-  phases="$(events "$job-resume" | jq -r '[.[] | .phase] | join(" ")')"
-  [[ "$phases" == "started kali verify" ]] && pass "re-run resumes at kali" || fail "re-run phases: $phases"
+  # Skipped phases still report their percentage, so check the log for what ran.
+  local skipped
+  skipped="$(ssh_to "$ip" "grep -o 'phase [a-z]*: already done' /var/log/openclaw-install.log | sort -u | cut -d' ' -f2 | tr -d : | tr '\\n' ' '")"
+  [[ "$skipped" == "docker openclaw preflight " ]] && pass "re-run skips the finished phases" || fail "re-run skipped: '$skipped'"
+  [[ "$(events "$job-resume" | jq -r '.[-1].event')" == succeeded ]] && pass "re-run succeeds" || fail "re-run did not succeed"
   # Runs in the background, so report through the exit code.
   ((FAILURES == 0))
 }
