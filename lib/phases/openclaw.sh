@@ -30,8 +30,23 @@ install_openclaw() {
     OPENCLAW_NO_PROMPT=1 bash "$dir/install.sh" --version "$OPENCLAW_VERSION" --no-prompt --no-onboard
     rm -rf "$dir"
   fi
+  resolve_openclaw_bin
+}
+
+# resolve_openclaw_bin: sets OPENCLAW_BIN, also on a resumed run where this
+# phase was skipped.
+resolve_openclaw_bin() {
   hash -r
   OPENCLAW_BIN="$(command -v openclaw)" || die "openclaw binary not found on PATH after install"
+}
+
+# as_install_user CMD...: runs CMD as the install user, with its home.
+as_install_user() {
+  (
+    export HOME="/home/$INSTALL_USER"
+    cd /
+    runuser -u "$INSTALL_USER" -- "$@"
+  )
 }
 
 # The provider key lives only in this root-only file, which systemd reads
@@ -59,9 +74,8 @@ onboard_openclaw() {
   # A subshell keeps the key out of this script's environment; it reaches
   # onboarding through the environment only, never the command line.
   (
-    export "$name=$LLM_API_KEY" HOME="$home"
-    cd /
-    runuser -u "$INSTALL_USER" -- "$OPENCLAW_BIN" onboard --non-interactive --accept-risk \
+    export "$name=$LLM_API_KEY"
+    as_install_user "$OPENCLAW_BIN" onboard --non-interactive --accept-risk \
       --mode local --auth-choice "$LLM_AUTH_CHOICE" --secret-input-mode ref \
       --gateway-bind loopback --gateway-port "$GATEWAY_PORT" \
       --skip-daemon --skip-skills --skip-health
