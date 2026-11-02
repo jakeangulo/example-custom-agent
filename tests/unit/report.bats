@@ -34,7 +34,7 @@ body() { cat "$CALL_DIR/$1.body"; }
 @test "the bearer token goes through stdin, never the command line" {
   post_event started 0 started "Installer started"
   grep -q "Authorization: Bearer $CALLBACK_TOKEN" "$CALL_DIR/1.config"
-  ! grep -q "$CALLBACK_TOKEN" "$SHIM_LOG"
+  ! grep -q "$CALLBACK_TOKEN" "$SHIM_LOG" || false
 }
 
 @test "a failed event carries the exit code and a redacted log tail" {
@@ -42,7 +42,7 @@ body() { cat "$CALL_DIR/$1.body"; }
   [ "$(body 1 | jq -r .event)" = failed ]
   [ "$(body 1 | jq -r .exit_code)" = 7 ]
   [[ "$(body 1 | jq -r .log_tail)" == *"line one"* ]]
-  ! body 1 | grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN"
+  ! body 1 | grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" || false
   [[ "$(body 1 | jq -r .log_tail)" == *"[REDACTED]"* ]]
 }
 
@@ -75,7 +75,7 @@ body() { cat "$CALL_DIR/$1.body"; }
 @test "a dry run posts nothing" {
   DRY_RUN=true
   post_event started 0 started a
-  ! grep -q '^curl' "$SHIM_LOG"
+  ! grep -q '^curl' "$SHIM_LOG" || false
 }
 
 @test "each attempt has a 5 second timeout" {
@@ -95,7 +95,7 @@ body() { cat "$CALL_DIR/$1.body"; }
   shim mktemp 1
   run post_event started 0 started "x"
   [ "$status" -eq 0 ]
-  ! grep -q '^curl' "$SHIM_LOG"
+  ! grep -q '^curl' "$SHIM_LOG" || false
   [[ "$output" == *"WARN"* ]]
 }
 
@@ -103,7 +103,7 @@ body() { cat "$CALL_DIR/$1.body"; }
   post_event failed 20 preflight $'say "hi" \\ path\tend' 1 $'line\r\n\033[31mred\033[0m\x01done "q"'
   [ "$(body 1 | jq -r .message)" = $'say "hi" \\ path\tend' ]
   [[ "$(body 1 | jq -r .log_tail)" == *"red"*"done \"q\""* ]]
-  ! body 1 | jq -r .log_tail | grep -q $'\033'
+  ! body 1 | jq -r .log_tail | grep -q $'\033' || false
 }
 
 @test "the log tail is capped at 12000 bytes, keeping the end" {

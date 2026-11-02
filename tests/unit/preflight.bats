@@ -31,13 +31,13 @@ setup() {
   MISSING="iptables gpg git"
   phase_preflight
   grep -qE '^dnf -y install ca-certificates git iptables-nft$' "$SHIM_LOG"
-  ! grep -q '^apt-get' "$SHIM_LOG"
+  ! grep -q '^apt-get' "$SHIM_LOG" || false
 }
 
 @test "nothing is installed when every tool is present on dnf" {
   use_os fedora-42
   phase_preflight
-  ! grep -q '^dnf' "$SHIM_LOG"
+  ! grep -q '^dnf' "$SHIM_LOG" || false
 }
 
 @test "the install user is created as a system user with a home" {
@@ -48,5 +48,5 @@ setup() {
 @test "an existing install user is left alone" {
   shim id 0
   phase_preflight
-  ! grep -q '^useradd' "$SHIM_LOG"
+  ! grep -q '^useradd' "$SHIM_LOG" || false
 }

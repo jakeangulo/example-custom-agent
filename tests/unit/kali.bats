@@ -49,7 +49,7 @@ built_tag() { grep '^docker build' "$SHIM_LOG" | sed -E 's/.* -t ([^ ]+) .*/\1/'
   local tag; tag="$(built_tag)"
   : > "$SHIM_LOG"
   BUILT_TAGS="$tag" phase_kali
-  ! grep -q '^docker build' "$SHIM_LOG"
+  ! grep -q '^docker build' "$SHIM_LOG" || false
   [ "$(sandbox .docker.image)" = "$tag" ]
 }
 
@@ -63,7 +63,7 @@ built_tag() { grep '^docker build' "$SHIM_LOG" | sed -E 's/.* -t ([^ ]+) .*/\1/'
 @test "empty KALI_PACKAGES uses the Kali image as-is" {
   KALI_PACKAGES=""
   phase_kali
-  ! grep -q '^docker build' "$SHIM_LOG"
+  ! grep -q '^docker build' "$SHIM_LOG" || false
   [ "$(sandbox .docker.image)" = "$KALI_IMAGE" ]
 }
 

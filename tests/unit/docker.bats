@@ -51,7 +51,7 @@ EOF2
 
 @test "downloads are https-only" {
   phase_docker
-  ! grep '^curl' "$SHIM_LOG" | grep -v -- "--proto =https --tlsv1.2"
+  ! grep '^curl' "$SHIM_LOG" | grep -v -- "--proto =https --tlsv1.2" || false
 }
 
 @test "docker is enabled and started, and the install user joins the docker group" {
@@ -64,7 +64,7 @@ EOF2
   have() { true; }
   export DOCKER_ACTIVE_RC=0
   phase_docker
-  ! grep -q 'docker-ce' "$SHIM_LOG"
+  ! grep -q 'docker-ce' "$SHIM_LOG" || false
   grep -qx 'usermod -aG docker openclaw' "$SHIM_LOG"
 }
 
@@ -90,5 +90,5 @@ EOF2
 @test "the metadata block adds nothing when the rules exist" {
   shim iptables 0   # -C finds the rules
   bash "$REPO_ROOT/files/openclaw-metadata-block"
-  ! grep -q -- ' -I ' "$SHIM_LOG"
+  ! grep -q -- ' -I ' "$SHIM_LOG" || false
 }

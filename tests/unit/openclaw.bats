@@ -48,7 +48,7 @@ EOF
 @test "an install already at the pinned version is not reinstalled" {
   write_openclaw_shim
   phase_openclaw
-  ! grep -q '^upstream-installer' "$SHIM_LOG"
+  ! grep -q '^upstream-installer' "$SHIM_LOG" || false
 }
 
 @test "a different installed version is replaced" {
@@ -83,13 +83,13 @@ EOF
   LLM_AUTH_CHOICE=gemini-api-key
   phase_openclaw
   grep -q '^GEMINI_API_KEY=' "$ENV_FILE"
-  ! grep -q '^ANTHROPIC_API_KEY=' "$ENV_FILE"
+  ! grep -q '^ANTHROPIC_API_KEY=' "$ENV_FILE" || false
 }
 
 @test "onboarding runs as the install user with the key only in its environment" {
   phase_openclaw
   grep -q "^runuser -u openclaw -- .*openclaw onboard --non-interactive --accept-risk --mode local --auth-choice apiKey --secret-input-mode ref --gateway-bind loopback --gateway-port 18789 --skip-daemon --skip-skills --skip-health$" "$SHIM_LOG"
-  ! grep -q -e "$LLM_API_KEY" "$SHIM_LOG"
+  ! grep -q -e "$LLM_API_KEY" "$SHIM_LOG" || false
   [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/onboard.env")" = "$LLM_API_KEY" ]
   grep -q 'HOME=/home/openclaw' "$BATS_TEST_TMPDIR/onboard.env"
 }
@@ -103,7 +103,7 @@ EOF
   mkdir -p "$OCI_ROOT/home/openclaw/.openclaw"
   echo '{}' > "$OCI_ROOT/home/openclaw/.openclaw/openclaw.json"
   phase_openclaw
-  ! grep -q 'openclaw onboard' "$SHIM_LOG"
+  ! grep -q 'openclaw onboard' "$SHIM_LOG" || false
 }
 
 @test "the gateway runs as a system service under the install user" {

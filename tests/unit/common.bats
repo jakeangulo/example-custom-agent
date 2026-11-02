@@ -157,7 +157,7 @@ setup() {
   state_init
   state_is_done preflight
   state_is_done docker
-  ! state_is_done openclaw
+  ! state_is_done openclaw || false
 }
 
 @test "changing a non-secret parameter forgets completed phases" {
@@ -167,7 +167,7 @@ setup() {
   export OPENCLAW_VERSION="2026.11.0"
   parse_args; validate_params
   state_init
-  ! state_is_done preflight
+  ! state_is_done preflight || false
 }
 
 @test "changing only a secret keeps completed phases" {
@@ -185,7 +185,7 @@ setup() {
   state_init
   state_mark_done preflight
   next_sequence >/dev/null
-  ! grep -r -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$OCI_ROOT/var/lib/openclaw-install"
+  ! grep -r -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$OCI_ROOT/var/lib/openclaw-install" || false
 }
 
 @test "sequence numbers keep increasing across runs" {

@@ -16,7 +16,10 @@ log() {
   printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"
 }
 
+DIE_MESSAGE=""
+
 die() {
+  DIE_MESSAGE="$*"
   printf '[%s] ERROR: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >&2
   exit 1
 }
@@ -105,10 +108,19 @@ validate_params() {
   unset -f check
 
   if ((${#errors[@]})); then
+    DIE_MESSAGE="invalid parameters: $(printf '%s; ' "${errors[@]}")"
     printf 'Invalid parameters:\n' >&2
     printf '  - %s\n' "${errors[@]}" >&2
     exit 1
   fi
+}
+
+# callback_params_valid: true when the events endpoint can be reached, so even
+# a failure in the remaining validation can be reported.
+callback_params_valid() {
+  [[ "${CALLBACK_URL:-}" =~ ^https://[^[:space:]]+$ ]] &&
+    [[ "${CALLBACK_TOKEN:-}" =~ ^[A-Za-z0-9._~+/=-]{16,}$ ]] && ((${#CALLBACK_TOKEN} <= 512)) &&
+    [[ "${JOB_ID:-}" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]
 }
 
 # llm_key_env_name CHOICE: the environment variable OpenClaw reads the key from.
@@ -173,6 +185,8 @@ state_mark_done() {
 
 next_sequence() {
   local n=0
+  mkdir -p "$STATE_DIR"
+  chmod 700 "$STATE_DIR"
   [[ -f "$SEQ_FILE" ]] && n="$(cat "$SEQ_FILE")"
   n=$((n + 1))
   printf '%s\n' "$n" > "$SEQ_FILE"

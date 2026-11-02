@@ -23,6 +23,8 @@ phase_$p() {
   printf 'phase %s\n' "$p" >> "\$SHIM_LOG"
   if [[ "\${HANG_PHASE:-}" == $p ]]; then touch "\$BATS_TEST_TMPDIR/hanging"; sleep_real 5; fi
   if [[ "\${FAIL_PHASE:-}" == $p ]]; then echo "something broke in $p"; return "\${FAIL_RC:-3}"; fi
+  if [[ "\${DIE_PHASE:-}" == $p ]]; then die "custom reason in $p"; fi
+  env > "\$BATS_TEST_TMPDIR/env-$p"
 }
 EOF
   done
@@ -52,7 +54,7 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
   [ "$(phases_run)" = "preflight docker " ]
   [ "$(events | tail -1)" = "failed 20 docker" ]
   [ "$(events | grep -c '^failed')" = 1 ]
-  ! events | grep -q '^succeeded'
+  ! events | grep -q '^succeeded' || false
   [ "$(event 3 .exit_code)" = 7 ]
 }
 
@@ -105,11 +107,39 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
   [ ! -e "$OCI_ROOT/run/openclaw-install.lock" ]
 }
 
-@test "invalid parameters exit 1 and post nothing" {
-  unset KALI_IMAGE
+@test "invalid callback parameters exit 1 and post nothing" {
+  export CALLBACK_URL="http://not-https.example"
   run bash "$APP/install.sh"
   [ "$status" -eq 1 ]
   [ -z "$(events)" ]
+}
+
+@test "other invalid parameters are reported as one failed event" {
+  export KALI_IMAGE="no-tag"
+  run bash "$APP/install.sh"
+  [ "$status" -eq 1 ]
+  [ "$(events)" = "failed 0 started" ]
+  [[ "$(event 1 .message)" == *"KALI_IMAGE"* ]]
+  [ -z "$(phases_run)" ]
+}
+
+@test "a dry run with invalid parameters posts nothing" {
+  export KALI_IMAGE="no-tag"
+  run bash "$APP/install.sh" --dry-run
+  [ "$status" -eq 1 ]
+  [ -z "$(events)" ]
+}
+
+@test "a die inside a phase puts its reason in the failed event's message" {
+  DIE_PHASE=docker run bash "$APP/install.sh"
+  [ "$status" -eq 1 ]
+  [[ "$(event 3 .message)" == *"custom reason in docker"* ]]
+}
+
+@test "phases do not inherit the secrets in their environment" {
+  bash "$APP/install.sh"
+  ! grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$BATS_TEST_TMPDIR/env-openclaw" || false
+  grep -q "^JOB_ID=" "$BATS_TEST_TMPDIR/env-openclaw"
 }
 
 @test "a dry run validates and detects but changes and posts nothing" {
@@ -122,11 +152,12 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
   [ ! -e "$LOG" ]
 }
 
-@test "an unsupported distro fails before any event" {
+@test "an unsupported distro is reported as one failed event" {
   cp "$FIXTURES/os-release/opensuse-leap" "$OCI_ROOT/etc/os-release"
   run bash "$APP/install.sh"
   [ "$status" -ne 0 ]
-  [ -z "$(events)" ]
+  [ "$(events)" = "failed 0 started" ]
+  [[ "$(event 1 .message)" == *"unsupported distro"* ]]
 }
 
 @test "the log file is private and records phase output" {
@@ -137,7 +168,7 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
 
 @test "secrets never reach the log" {
   FAIL_PHASE=docker run bash "$APP/install.sh"
-  ! grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$LOG"
+  ! grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$LOG" || false
 }
 
 @test "SIGTERM during a phase posts a failed event" {

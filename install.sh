@@ -73,7 +73,11 @@ on_exit() {
   if ((rc != 0)) && $REPORTING && ! $FINAL_POSTED; then
     FINAL_POSTED=true
     local message="phase '$CURRENT_PHASE' failed with exit code $rc"
-    [[ -n "$FAILED_CMD" ]] && message+=" at line $FAILED_LINE: $FAILED_CMD"
+    if [[ -n "$DIE_MESSAGE" ]]; then
+      message+=": $DIE_MESSAGE"
+    elif [[ -n "$FAILED_CMD" ]]; then
+      message+=" at line $FAILED_LINE: $FAILED_CMD"
+    fi
     post_event failed "$LAST_PERCENT" "$CURRENT_PHASE" "$message" "$rc" "$(tail -n 50 "$LOG_FILE" 2>/dev/null)"
     log "ERROR: $message"
   fi
@@ -116,9 +120,21 @@ run_phases() {
 
 main() {
   parse_args "$@"
+  trap on_err ERR
+  trap on_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+
+  # With a usable events endpoint, a failure from here on is reported, so the
+  # client sees why instead of waiting for the deadline. A dry run never posts.
+  if [[ "${DRY_RUN:-false}" != true ]] && callback_params_valid; then
+    REPORTING=true
+  fi
   validate_params
   [[ $EUID -eq 0 || -n "$OCI_ROOT" ]] || die "must run as root"
   detect_os
+  # Secrets stay shell variables: no child process inherits them.
+  export -n CALLBACK_TOKEN LLM_API_KEY
 
   if [[ "$DRY_RUN" == true ]]; then
     log "dry run: parameters valid; distro $OS_ID uses $OS_FAMILY"
@@ -126,11 +142,8 @@ main() {
     exit 0
   fi
 
-  trap on_err ERR
-  trap on_exit EXIT
-  trap 'exit 130' INT
-  trap 'exit 143' TERM
-
+  # A run refused by the lock must not post: the other run owns this job.
+  REPORTING=false
   acquire_lock
   start_logging
   REPORTING=true
