@@ -12,10 +12,16 @@ SCRIPT_VERSION="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || ech
 source "$SCRIPT_DIR/lib/common.sh"
 # shellcheck source=lib/report.sh
 source "$SCRIPT_DIR/lib/report.sh"
-for f in "$SCRIPT_DIR"/lib/phases/*.sh; do
-  # shellcheck source=/dev/null
-  source "$f"
-done
+# shellcheck source=lib/phases/preflight.sh
+source "$SCRIPT_DIR/lib/phases/preflight.sh"
+# shellcheck source=lib/phases/docker.sh
+source "$SCRIPT_DIR/lib/phases/docker.sh"
+# shellcheck source=lib/phases/openclaw.sh
+source "$SCRIPT_DIR/lib/phases/openclaw.sh"
+# shellcheck source=lib/phases/kali.sh
+source "$SCRIPT_DIR/lib/phases/kali.sh"
+# shellcheck source=lib/phases/verify.sh
+source "$SCRIPT_DIR/lib/phases/verify.sh"
 
 LOCK_DIR="$OCI_ROOT/run/openclaw-install.lock"
 LOG_FILE="$OCI_ROOT/var/log/openclaw-install.log"

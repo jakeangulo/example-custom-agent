@@ -178,3 +178,37 @@ next_sequence() {
   printf '%s\n' "$n" > "$SEQ_FILE"
   printf '%s\n' "$n"
 }
+
+# --- system helpers used by the phases ---------------------------------------
+
+have() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+APT_UPDATED=false
+
+apt_get() {
+  DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -y -q "$@"
+}
+
+# pkg_update: refreshes the apt index (forced after adding a repository).
+pkg_update() {
+  [[ "$OS_FAMILY" == apt ]] || return 0
+  apt_get update
+  APT_UPDATED=true
+}
+
+# pkg_install PACKAGE...: installs with the distro's package manager.
+pkg_install() {
+  if [[ "$OS_FAMILY" == apt ]]; then
+    $APT_UPDATED || pkg_update
+    apt_get install --no-install-recommends "$@"
+  else
+    dnf -y install "$@"
+  fi
+}
+
+# download URL FILE: HTTPS-only fetch that fails on HTTP errors.
+download() {
+  curl -fsSL --proto '=https' --tlsv1.2 --retry 3 "$1" -o "$2"
+}

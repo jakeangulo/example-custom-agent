@@ -1,0 +1,13 @@
+[Unit]
+Description=Block the cloud metadata service for containers and non-root users
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/openclaw-metadata-block
+
+[Install]
+WantedBy=multi-user.target docker.service

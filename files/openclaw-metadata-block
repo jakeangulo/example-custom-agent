@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Drops traffic to the cloud metadata service from Docker containers and from
+# every non-root user. Idempotent: each rule is added only if missing.
+set -euo pipefail
+
+METADATA=169.254.169.254/32
+
+ensure_rule() {
+  local chain="$1"; shift
+  iptables -C "$chain" "$@" 2>/dev/null || iptables -I "$chain" "$@"
+}
+
+ensure_rule DOCKER-USER -d "$METADATA" -j DROP
+ensure_rule OUTPUT -d "$METADATA" -m owner ! --uid-owner 0 -j DROP

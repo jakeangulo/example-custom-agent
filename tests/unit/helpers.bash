@@ -74,3 +74,29 @@ events() {
     n=$((n + 1))
   done
 }
+
+# load_phases: sources the libraries and every phase with valid parameters.
+load_phases() {
+  SCRIPT_DIR="$REPO_ROOT"  # set by install.sh in production
+  source "$REPO_ROOT/lib/common.sh"
+  source "$REPO_ROOT/lib/report.sh"
+  local f
+  for f in "$REPO_ROOT"/lib/phases/*.sh; do source "$f"; done
+  parse_args
+  validate_params
+  detect_os
+}
+
+# use_os FIXTURE: switch the fake os-release and re-detect.
+use_os() {
+  cp "$FIXTURES/os-release/$1" "$OCI_ROOT/etc/os-release"
+  detect_os
+}
+
+# download_shim: a fake curl that creates the file named by -o.
+download_shim() {
+  shim_script curl <<'EOF2'
+prev=""; for a in "$@"; do [[ "$prev" == -o ]] && echo "downloaded $*" > "$a"; prev="$a"; done
+exit 0
+EOF2
+}
