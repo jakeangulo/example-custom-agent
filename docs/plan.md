@@ -33,13 +33,17 @@ These override the design doc where they differ.
 
 Non-secret parameters accept an env var or a `--flag`; the flag wins. Secret parameters are **env only**, and passing them as a flag fails.
 
+Through the provisioner ([api.md](https://gitlab.com/appyfic/marscape-hetzner-provisioner/-/blob/main/docs/api.md)), `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are injected by the platform. The client sends the rest in `install.params` (non-secret) and `install.secrets` (`LLM_API_KEY`).
+
+Each progress post is `POST $CALLBACK_URL` with `Authorization: Bearer $CALLBACK_TOKEN` and the body fields `event` (`started`, `in_progress`, `succeeded`, `failed`), `sequence`, `percent`, `phase`, `message`, `timestamp`, `hostname`, `script_version`, plus `exit_code` and `log_tail` on failure. This replaces the design doc's `status`/`success`/`failure` names, so the body matches the provisioner's events route.
+
 | Param | Req | Notes |
 |---|---|---|
 | `OPENCLAW_VERSION` | yes | Passed to `install.sh --version` |
 | `KALI_IMAGE` | yes | Full ref `registry/repo:tag` |
-| `CALLBACK_URL` | yes | HTTPS only |
-| `CALLBACK_TOKEN` | yes, secret | Replaces the doc's `API_KEY` |
-| `JOB_ID` | yes | |
+| `CALLBACK_URL` | yes | HTTPS only; set by the platform (`POST /deployments/{id}/events`) |
+| `CALLBACK_TOKEN` | yes, secret | Replaces the doc's `API_KEY`; set by the platform |
+| `JOB_ID` | yes | Set by the platform to the `deployment_id` |
 | `LLM_AUTH_CHOICE` | yes | Validated against a mapping table, e.g. `apiKey` → `--anthropic-api-key` / `ANTHROPIC_API_KEY`, `gemini-api-key`, `openai-api-key`, … |
 | `LLM_API_KEY` | yes, secret | |
 | `INSTALL_USER` | no | Default `openclaw` |
@@ -115,9 +119,9 @@ always runs.
   - The sandbox image runs `nmap --version`.
   - From inside a bridge container, a request to `169.254.169.254` fails.
   - Clean up: delete the installer's own temp files and `unset` the secrets.
-  - Post `success` with percent 100.
+  - Post `succeeded` with percent 100.
 
-**Failure path:** the EXIT trap posts `failure` with the phase, exit code and `tail -n 50` of the log (secrets never reach the
+**Failure path:** the EXIT trap posts `failed` with the phase, exit code and `tail -n 50` of the log (secrets never reach the
 log), then exits with the original code.
 
 ## Things to confirm on the first Hetzner server
@@ -158,13 +162,13 @@ The docs don't settle these; the code keeps each one in a single function so it'
      CentOS Stream, Fedora. Image names are picked from `hcloud image list --type system` at run time.
    - All servers are labelled, and a trap always tears them down.
    - Asserts for each distro:
-     - the receiver got 0→20→40→60→80→100 + `success` in sequence order;
+     - the receiver got 0→20→40→60→80→100 + `succeeded` in sequence order;
      - over SSH, the gateway service is active and the sandbox config is present;
      - `sudo -u openclaw curl 169.254.169.254` fails;
      - a bridge container can't reach the metadata service;
      - the token and LLM key appear only in `/etc/openclaw/openclaw.env`.
    - Negative runs:
-     - a bad `KALI_IMAGE` gives a `failure` post with phase `kali` and a log tail;
+     - a bad `KALI_IMAGE` gives a `failed` post with phase `kali` and a log tail;
      - re-running with the image fixed resumes at kali;
      - a concurrent second run is refused by the lock.
    - Cost: about 7 servers for under an hour.
