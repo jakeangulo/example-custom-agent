@@ -4,7 +4,7 @@ Installs a pinned version of [OpenClaw](https://docs.openclaw.ai) on a fresh Het
 
 It is the install repository for the [Hetzner provisioning service](https://gitlab.com/appyfic/marscape-hetzner-provisioner): a client asks the provisioner for a server with this repository, and the provisioner passes the parameters below through cloud-init. Design: [docs/design.md](docs/design.md).
 
-Supported images: Debian, Ubuntu, Rocky Linux, AlmaLinux, CentOS Stream and Fedora.
+Supported images: Debian, Ubuntu, Rocky Linux, AlmaLinux, CentOS Stream and Fedora. First verified on a real server on 2026-11-15 through the provisioning service: Ubuntu 26.04 on a Hetzner `cpx22`, about 13 minutes in total, most of it the Kali phase with the default `KALI_PACKAGES`. On a `cpx02` the same install did not finish within 25 minutes, so give small servers a smaller `KALI_PACKAGES` or a longer deadline.
 
 ## What it does
 
@@ -26,7 +26,7 @@ Set them as environment variables; non-secret ones can also be given as options 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `OPENCLAW_VERSION` | Yes | OpenClaw version or dist-tag, e.g. `2026.10.2` |
-| `KALI_IMAGE` | Yes | Kali image with tag or digest, e.g. `kalilinux/kali-rolling:2025.4` |
+| `KALI_IMAGE` | Yes | Kali image with tag or digest, e.g. `kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c` (Kali publishes only rolling tags such as `latest`, so pin a digest) |
 | `KALI_PACKAGES` | No | Packages to add to the image; default `kali-linux-headless` (several GB, ~10 min). Empty uses the image as-is |
 | `LLM_AUTH_CHOICE` | Yes | `apiKey` (Anthropic), `openai-api-key`, `gemini-api-key` or `mistral-api-key` |
 | `LLM_API_KEY` | Yes, secret | The provider's API key |
@@ -52,7 +52,7 @@ hcloud server create --name kali-agent --type cpx31 --image ubuntu-24.04 --locat
 On an existing server, as root:
 
 ```bash
-export OPENCLAW_VERSION=2026.10.2 KALI_IMAGE=kalilinux/kali-rolling:2025.4 LLM_AUTH_CHOICE=apiKey \
+export OPENCLAW_VERSION=2026.10.2 KALI_IMAGE=kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c LLM_AUTH_CHOICE=apiKey \
        CALLBACK_URL=https://… JOB_ID=manual-1
 read -rs LLM_API_KEY && export LLM_API_KEY
 read -rs CALLBACK_TOKEN && export CALLBACK_TOKEN

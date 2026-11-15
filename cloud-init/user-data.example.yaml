@@ -19,7 +19,7 @@ write_files:
       INSTALL_REPO_REF='0000000000000000000000000000000000000000'
       INSTALL_SCRIPT='install.sh'
       OPENCLAW_VERSION='2026.10.2'
-      KALI_IMAGE='kalilinux/kali-rolling:2025.4'
+      KALI_IMAGE='kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c'
       KALI_PACKAGES='kali-linux-headless'
       CALLBACK_URL='https://receiver.example.com/deployments/demo-1/events'
       CALLBACK_TOKEN='replace-with-a-long-random-token'
