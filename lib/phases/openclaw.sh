@@ -14,6 +14,7 @@ phase_openclaw() {
   onboard_openclaw
   allow_control_ui_origin
   install_gateway_service
+  install_cli_helper
 }
 
 install_openclaw() {
@@ -106,4 +107,17 @@ install_gateway_service() {
   systemctl daemon-reload
   systemctl enable openclaw-gateway.service
   systemctl restart openclaw-gateway.service
+}
+
+# openclaw-cli runs OpenClaw as the gateway does, and `openclaw-cli login`
+# prints the one-time Control UI link with the public address.
+install_cli_helper() {
+  local helper="$OCI_ROOT/usr/local/sbin/openclaw-cli"
+  mkdir -p "$(dirname "$helper")"
+  sed -e "s|@USER@|$INSTALL_USER|g" -e "s|@HOME@|/home/$INSTALL_USER|g" \
+    -e "s|@OPENCLAW_BIN@|$OPENCLAW_BIN|g" -e "s|@PORT@|$GATEWAY_PORT|g" \
+    -e "s|@ENV_FILE@|$OCI_ROOT$OPENCLAW_ENV_FILE|g" -e "s|@PUBLIC_URL@|$CONTROL_UI_URL|g" \
+    "$SCRIPT_DIR/files/openclaw-cli" > "$helper"
+  chmod 755 "$helper"
+  log "Control UI login: run 'openclaw-cli login' as root on this server"
 }

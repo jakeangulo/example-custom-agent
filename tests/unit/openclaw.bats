@@ -14,6 +14,10 @@ setup() {
 if [[ "$1" == onboard ]]; then
   echo "${OPENCLAW_GATEWAY_TOKEN:-unset} HOME=$HOME" > "$BATS_TEST_TMPDIR/onboard.env"
 fi
+if [[ "$1" == dashboard ]]; then
+  echo "${OPENCLAW_GATEWAY_TOKEN:-unset}" > "$BATS_TEST_TMPDIR/dashboard.token"
+  echo '{"ok":true,"url":"http://127.0.0.1:18789/","browserUrl":"http://127.0.0.1:18789/#bootstrapToken=one-time&bootstrapProfile=p&gatewayUrl=ws%3A%2F%2F127.0.0.1%3A18789"}'
+fi
 exit 0
 EOF
   }
@@ -133,4 +137,42 @@ EOF
   grep -qx 'systemctl daemon-reload' "$SHIM_LOG"
   grep -qx 'systemctl enable openclaw-gateway.service' "$SHIM_LOG"
   grep -qx 'systemctl restart openclaw-gateway.service' "$SHIM_LOG"
+}
+
+@test "openclaw-cli is installed with this server's user, env file and public URL" {
+  phase_openclaw
+  local helper="$OCI_ROOT/usr/local/sbin/openclaw-cli"
+  [ "$(stat -c %a "$helper" 2>/dev/null || stat -f %Lp "$helper")" = 755 ]
+  ! grep -q '@[A-Z_]*@' "$helper" || false
+  grep -qx 'PUBLIC_URL="http://203.0.113.10:18789"' "$helper"
+}
+
+@test "openclaw-cli login prints the one-time link with the public address" {
+  phase_openclaw
+  run "$OCI_ROOT/usr/local/sbin/openclaw-cli" login
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"http://203.0.113.10:18789/#bootstrapToken=one-time&bootstrapProfile=p&gatewayUrl=ws%3A%2F%2F203.0.113.10%3A18789"* ]]
+  [[ "$output" != *"127.0.0.1"* ]]
+  local token; token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN="\(.*\)"$/\1/p' "$ENV_FILE")"
+  [[ "$output" != *"$token"* ]]
+  [ "$(cat "$BATS_TEST_TMPDIR/dashboard.token")" = "$token" ]
+  grep -q '^runuser -u openclaw -- env HOME=/home/openclaw /.*openclaw dashboard --json$' "$SHIM_LOG"
+  ! grep -qF -- "$token" "$SHIM_LOG" || false
+}
+
+@test "openclaw-cli passes other commands to OpenClaw as the install user with the token" {
+  phase_openclaw
+  run "$OCI_ROOT/usr/local/sbin/openclaw-cli" devices list
+  [ "$status" -eq 0 ]
+  grep -q '^runuser -u openclaw -- env HOME=/home/openclaw /.*openclaw devices list$' "$SHIM_LOG"
+}
+
+@test "openclaw-cli refuses to run without the env file" {
+  phase_openclaw
+  chmod 000 "$ENV_FILE"
+  run "$OCI_ROOT/usr/local/sbin/openclaw-cli" login
+  chmod 600 "$ENV_FILE"
+  [[ "$(id -u)" == 0 ]] && skip "root can read any file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"run it as root"* ]]
 }

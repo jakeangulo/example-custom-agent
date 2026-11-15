@@ -60,13 +60,19 @@ Logs are in `/var/log/openclaw-install.log`.
 
 ## Using the Control UI
 
-The gateway serves OpenClaw's Control UI on `http://<server public IPv4>:18789`, bound to all interfaces with token auth. Open port `18789` only to your own IP in the server's firewall (with the provisioner, add a `tcp` rule for port `18789` next to the SSH rule). The first time, over SSH:
+The gateway serves OpenClaw's Control UI on `http://<server public IPv4>:18789`, on all interfaces with token auth. Open port `18789` only to your own IP in the server's firewall (with the provisioner, add a `tcp` rule for port `18789` next to the SSH rule).
 
-1. Get the gateway token: `runuser -u openclaw -- env HOME=/home/openclaw openclaw gateway auth-token --show`, and paste it into the Control UI's **Gateway secret** field.
-2. Approve the browser: a browser that is not on the server itself waits for approval. Run `runuser -u openclaw -- env HOME=/home/openclaw openclaw devices list`, then `… openclaw devices approve <requestId>`. The browser is remembered after that.
-3. Add a model provider in **Models → Connect provider**.
+To log in, run one command on the server and open the link it prints:
 
-The UI is plain HTTP, so the token crosses the network unencrypted; keep the firewall rule limited to your IP, or put the UI behind TLS (for example Tailscale Serve).
+```bash
+ssh root@<server-ip> openclaw-cli login
+```
+
+The link works once, within ten minutes, and pairs that browser as administrator: there is no token to paste and no device to approve. Run it again for another browser or after clearing site data. Then add a model provider in **Models → Connect provider**.
+
+For any other OpenClaw command on the server, use `openclaw-cli` instead of `openclaw`, for example `openclaw-cli devices list`. It runs OpenClaw as the `openclaw` user with the gateway token from `/etc/openclaw/openclaw.env`. Plain `openclaw` as root reads root's own config and fails with "gateway token mismatch".
+
+The UI is plain HTTP, so traffic crosses the network unencrypted; keep the firewall rule limited to your IP, or put the UI behind TLS (for example Tailscale Serve).
 
 ## Events
 
@@ -100,7 +106,7 @@ Each event is a `POST` to `CALLBACK_URL` with `Authorization: Bearer $CALLBACK_T
 Requirements: `bash` 4+, `bats-core`, `shellcheck`, `jq` (macOS: `brew install bash bats-core shellcheck jq`).
 
 ```bash
-shellcheck -x install.sh files/openclaw-metadata-block
+shellcheck -x install.sh files/openclaw-metadata-block files/openclaw-cli
 bats tests/unit
 ```
 
