@@ -32,13 +32,13 @@ setup() {
   run parse_args --callback-token abc
   [ "$status" -ne 0 ]
   [[ "$output" == *"CALLBACK_TOKEN"*"environment"* ]]
-  run parse_args --llm-api-key=abc
+  run parse_args --callback-token=abc
   [ "$status" -ne 0 ]
-  [[ "$output" == *"LLM_API_KEY"*"environment"* ]]
+  [[ "$output" == *"CALLBACK_TOKEN"*"environment"* ]]
 }
 
 @test "the refusal message never echoes the secret value" {
-  run parse_args --llm-api-key sk-very-secret
+  run parse_args --callback-token sk-very-secret
   [[ "$output" != *"sk-very-secret"* ]]
 }
 
@@ -49,11 +49,11 @@ setup() {
 }
 
 @test "every missing required parameter is reported at once" {
-  unset OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID LLM_AUTH_CHOICE LLM_API_KEY
+  unset OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID
   parse_args
   run validate_params
   [ "$status" -ne 0 ]
-  for p in OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID LLM_AUTH_CHOICE LLM_API_KEY; do
+  for p in OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID; do
     [[ "$output" == *"$p"* ]]
   done
 }
@@ -67,7 +67,6 @@ setup() {
     "CALLBACK_TOKEN=short"
     "CALLBACK_TOKEN=has space in it 0123456789"
     "JOB_ID=bad id"
-    "LLM_AUTH_CHOICE=made-up"
     "INSTALL_USER=root"
     "INSTALL_USER=Bad-User"
     "KALI_PACKAGES=nmap; curl evil"
@@ -107,15 +106,6 @@ setup() {
   parse_args
   validate_params
   [ "$KALI_PACKAGES" = "" ]
-}
-
-@test "llm_key_env_name maps each supported auth choice" {
-  [ "$(llm_key_env_name apiKey)" = "ANTHROPIC_API_KEY" ]
-  [ "$(llm_key_env_name openai-api-key)" = "OPENAI_API_KEY" ]
-  [ "$(llm_key_env_name gemini-api-key)" = "GEMINI_API_KEY" ]
-  [ "$(llm_key_env_name mistral-api-key)" = "MISTRAL_API_KEY" ]
-  run llm_key_env_name nope
-  [ "$status" -ne 0 ]
 }
 
 # --- OS detection -----------------------------------------------------------
@@ -200,7 +190,7 @@ setup() {
   parse_args; validate_params
   state_init
   state_mark_done preflight
-  export LLM_API_KEY="sk-ant-rotated"
+  export CALLBACK_TOKEN="rotated-token-0123456789abcdef"
   parse_args; validate_params
   state_init
   state_is_done preflight
@@ -211,7 +201,7 @@ setup() {
   state_init
   state_mark_done preflight
   next_sequence >/dev/null
-  ! grep -r -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$OCI_ROOT/var/lib/openclaw-install" || false
+  ! grep -r -e "$CALLBACK_TOKEN" "$OCI_ROOT/var/lib/openclaw-install" || false
 }
 
 @test "sequence numbers keep increasing across runs" {
@@ -230,7 +220,7 @@ setup() {
 }
 
 @test "validation reports missing secrets cleanly under set -u" {
-  unset CALLBACK_TOKEN LLM_API_KEY
+  unset CALLBACK_TOKEN
   run bash -c 'set -euo pipefail; source "$1"; parse_args; validate_params' _ "$REPO_ROOT/lib/common.sh"
   [ "$status" -eq 1 ]
   [[ "$output" == *"CALLBACK_TOKEN is required"* ]]

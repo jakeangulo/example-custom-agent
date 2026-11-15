@@ -34,14 +34,15 @@ upper case (for example --kali-image or KALI_IMAGE); the option wins.
   --kali-image REF       Kali image, registry/repo:tag or @digest (required)
   --callback-url URL     HTTPS events endpoint (required)
   --job-id ID            Deployment ID echoed in every event (required)
-  --llm-auth-choice C    apiKey | openai-api-key | gemini-api-key | mistral-api-key (required)
   --install-user U       User OpenClaw runs as (default: openclaw)
   --kali-packages "P"    Packages to add to the Kali image (default: kali-linux-headless; "" = none)
   --dry-run              Validate and detect only; change nothing
 
 Secrets are read from the environment only and are refused as options:
   CALLBACK_TOKEN         Bearer token for the events endpoint (required)
-  LLM_API_KEY            API key for the chosen model provider (required)
+
+Model provider credentials are not parameters: add them in the Control UI
+(Models -> Connect provider) after the install.
 EOF
 }
 
@@ -53,14 +54,14 @@ parse_args() {
       val="${opt#*=}"; opt="${opt%%=*}"; has_val=true
     fi
     case "$opt" in
-      --callback-token | --llm-api-key)
+      --callback-token)
         local name
         name="$(printf '%s' "${opt#--}" | tr 'a-z-' 'A-Z_')"
         die "$name is a secret: set it in the environment, not as an option"
         ;;
       --help | -h) usage; exit 0 ;;
       --dry-run) DRY_RUN=true; shift; continue ;;
-      --openclaw-version | --kali-image | --callback-url | --job-id | --llm-auth-choice | \
+      --openclaw-version | --kali-image | --callback-url | --job-id | \
         --install-user | --kali-packages)
         if ! $has_val; then
         (($# >= 2)) || die "$opt needs a value"
@@ -82,7 +83,7 @@ validate_params() {
   DRY_RUN="${DRY_RUN:-false}"
 
   local errors=() p
-  for p in OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID LLM_AUTH_CHOICE LLM_API_KEY; do
+  for p in OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID; do
     [[ -n "${!p:-}" ]] || errors+=("$p is required")
   done
 
@@ -100,10 +101,6 @@ validate_params() {
   check KALI_PACKAGES '^[a-z0-9.+ -]*$' 'must be space-separated Debian package names'
   check DRY_RUN '^(true|false)$' 'must be true or false'
   [[ "$INSTALL_USER" != root ]] || errors+=("INSTALL_USER must not be root")
-  if [[ -n "${LLM_AUTH_CHOICE:-}" ]] && ! llm_key_env_name "$LLM_AUTH_CHOICE" >/dev/null; then
-    errors+=("LLM_AUTH_CHOICE must be one of: apiKey openai-api-key gemini-api-key mistral-api-key")
-  fi
-  [[ "${LLM_API_KEY:-}" != *$'\n'* ]] || errors+=("LLM_API_KEY must be a single line")
   unset -f check
 
   if ((${#errors[@]})); then
@@ -122,16 +119,6 @@ callback_params_valid() {
     [[ "${JOB_ID:-}" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]
 }
 
-# llm_key_env_name CHOICE: the environment variable OpenClaw reads the key from.
-llm_key_env_name() {
-  case "$1" in
-    apiKey) echo ANTHROPIC_API_KEY ;;
-    openai-api-key) echo OPENAI_API_KEY ;;
-    gemini-api-key) echo GEMINI_API_KEY ;;
-    mistral-api-key) echo MISTRAL_API_KEY ;;
-    *) return 1 ;;
-  esac
-}
 
 # detect_os: sets OS_ID, OS_CODENAME and OS_FAMILY (apt | dnf) from os-release.
 # Only the exact supported IDs are accepted, because the Docker repository
@@ -162,7 +149,7 @@ sha256() {
 phase_inputs() {
   case "$1" in
     preflight | docker) echo INSTALL_USER ;;
-    openclaw) echo INSTALL_USER OPENCLAW_VERSION LLM_AUTH_CHOICE ;;
+    openclaw) echo INSTALL_USER OPENCLAW_VERSION ;;
     kali) echo INSTALL_USER KALI_IMAGE KALI_PACKAGES ;;
     *) echo INSTALL_USER ;;
   esac

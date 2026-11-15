@@ -138,7 +138,7 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
 
 @test "phases do not inherit the secrets in their environment" {
   bash "$APP/install.sh"
-  ! grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$BATS_TEST_TMPDIR/env-openclaw" || false
+  ! grep -q -e "$CALLBACK_TOKEN" "$BATS_TEST_TMPDIR/env-openclaw" || false
   grep -q "^JOB_ID=" "$BATS_TEST_TMPDIR/env-openclaw"
 }
 
@@ -168,7 +168,7 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
 
 @test "secrets never reach the log" {
   FAIL_PHASE=docker run bash "$APP/install.sh"
-  ! grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" "$LOG" || false
+  ! grep -q -e "$CALLBACK_TOKEN" "$LOG" || false
 }
 
 @test "SIGTERM during a phase posts a failed event" {

@@ -5,21 +5,24 @@ load helpers
 setup() {
   common_setup
   shim systemctl
-  # Fake openclaw: logs, answers --version, and records whether the provider
-  # key reached its environment during onboarding.
+  # Fake openclaw: logs, answers --version, and records whether the gateway
+  # token reached its environment during onboarding.
   export OPENCLAW_SHIM_VERSION="2026.10.2"
   write_openclaw_shim() {
     shim_script openclaw <<'EOF'
 [[ "$1" == --version ]] && { echo "OpenClaw $OPENCLAW_SHIM_VERSION"; exit 0; }
 if [[ "$1" == onboard ]]; then
-  echo "${ANTHROPIC_API_KEY:-unset} ${GEMINI_API_KEY:-unset} HOME=$HOME" > "$BATS_TEST_TMPDIR/onboard.env"
+  echo "${OPENCLAW_GATEWAY_TOKEN:-unset} HOME=$HOME" > "$BATS_TEST_TMPDIR/onboard.env"
 fi
 exit 0
 EOF
   }
-  # Fake download: the upstream installer, when fetched, is a script that logs
-  # its arguments and "installs" the openclaw shim.
+  # Fake download: the metadata service answers with PUBLIC_IPV4; the upstream
+  # installer, when fetched, is a script that logs its arguments and
+  # "installs" the openclaw shim.
+  export PUBLIC_IPV4="203.0.113.10"
   shim_script curl <<'EOF'
+if [[ "${*: -1}" == *169.254.169.254* ]]; then [[ -n "$PUBLIC_IPV4" ]] || exit 22; echo "$PUBLIC_IPV4"; exit 0; fi
 prev=""; for a in "$@"; do [[ "$prev" == -o ]] && out="$a"; prev="$a"; done
 cat > "$out" <<'EOS'
 printf 'upstream-installer %s\n' "$*" >> "$SHIM_LOG"
@@ -73,30 +76,43 @@ EOF
   [[ "$output" == *"openclaw"*"not found"* ]]
 }
 
-@test "the provider key is written to a root-only env file" {
+@test "a gateway token is generated into a root-only env file" {
   phase_openclaw
   [ "$(stat -c %a "$ENV_FILE" 2>/dev/null || stat -f %Lp "$ENV_FILE")" = 600 ]
-  grep -qx "ANTHROPIC_API_KEY=\"$LLM_API_KEY\"" "$ENV_FILE"
+  grep -qE '^OPENCLAW_GATEWAY_TOKEN="[0-9a-f]{64}"$' "$ENV_FILE"
 }
 
-@test "the env file names the variable for the chosen provider" {
-  LLM_AUTH_CHOICE=gemini-api-key
+@test "a re-run keeps the existing gateway token" {
+  mkdir -p "$(dirname "$ENV_FILE")"
+  echo 'OPENCLAW_GATEWAY_TOKEN="kept-token-0123456789"' > "$ENV_FILE"
   phase_openclaw
-  grep -q '^GEMINI_API_KEY=' "$ENV_FILE"
-  ! grep -q '^ANTHROPIC_API_KEY=' "$ENV_FILE" || false
+  grep -qx 'OPENCLAW_GATEWAY_TOKEN="kept-token-0123456789"' "$ENV_FILE"
 }
 
-@test "onboarding runs as the install user with the key only in its environment" {
+@test "onboarding configures no provider and token auth on the LAN bind, with the token only in its environment" {
   phase_openclaw
-  grep -q "^runuser -u openclaw -- .*openclaw onboard --non-interactive --accept-risk --mode local --auth-choice apiKey --secret-input-mode ref --gateway-bind loopback --gateway-port 18789 --skip-daemon --skip-skills --skip-health$" "$SHIM_LOG"
-  ! grep -q -e "$LLM_API_KEY" "$SHIM_LOG" || false
-  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/onboard.env")" = "$LLM_API_KEY" ]
+  grep -q "^runuser -u openclaw -- .*openclaw onboard --non-interactive --accept-risk --mode local --auth-choice skip --secret-input-mode ref --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN --gateway-bind lan --gateway-port 18789 --skip-daemon --skip-skills --skip-health$" "$SHIM_LOG"
+  local token; token="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN="\(.*\)"$/\1/p' "$ENV_FILE")"
+  ! grep -q -e "$token" "$SHIM_LOG" || false
+  [ "$(cut -d' ' -f1 "$BATS_TEST_TMPDIR/onboard.env")" = "$token" ]
   grep -q 'HOME=/home/openclaw' "$BATS_TEST_TMPDIR/onboard.env"
 }
 
-@test "the key does not leak into the installer's own environment" {
+@test "the token does not leak into the installer's own environment" {
   phase_openclaw
-  [ -z "${ANTHROPIC_API_KEY:-}" ]
+  [ -z "${OPENCLAW_GATEWAY_TOKEN:-}" ]
+}
+
+@test "the Control UI accepts the server's public IPv4 origin" {
+  phase_openclaw
+  grep -q '^runuser -u openclaw -- .*openclaw config set gateway.controlUi.allowedOrigins \["http://203.0.113.10:18789"\] --strict-json$' "$SHIM_LOG"
+}
+
+@test "no public IPv4 from the metadata service fails the phase" {
+  export PUBLIC_IPV4=""
+  run phase_openclaw
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"public IPv4"* ]]
 }
 
 @test "onboarding is skipped once the user has a config" {
@@ -112,7 +128,7 @@ EOF
   grep -qx 'SupplementaryGroups=docker' "$UNIT"
   grep -qx 'EnvironmentFile=/etc/openclaw/openclaw.env' "$UNIT"
   grep -qx 'Environment=HOME=/home/openclaw' "$UNIT"
-  grep -qE "^ExecStart=/.+/openclaw gateway run --port 18789 --bind loopback$" "$UNIT"
+  grep -qE "^ExecStart=/.+/openclaw gateway run --port 18789 --bind lan$" "$UNIT"
   grep -qx 'RestartPreventExitStatus=78' "$UNIT"
   grep -qx 'systemctl daemon-reload' "$SHIM_LOG"
   grep -qx 'systemctl enable openclaw-gateway.service' "$SHIM_LOG"

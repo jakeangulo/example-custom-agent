@@ -52,8 +52,6 @@ Every input is a parameter: an environment variable, or an option that takes pre
 | `CALLBACK_URL` | Yes | HTTPS events route; set by the provisioner |
 | `CALLBACK_TOKEN` | Yes, secret | Per-deployment bearer token for the events route; set by the provisioner |
 | `JOB_ID` | Yes | Deployment ID echoed in every event; set by the provisioner |
-| `LLM_AUTH_CHOICE` | Yes | `apiKey` (Anthropic), `openai-api-key`, `gemini-api-key` or `mistral-api-key` |
-| `LLM_API_KEY` | Yes, secret | The provider's API key |
 | `INSTALL_USER` | No (default `openclaw`) | Dedicated non-root system user OpenClaw runs as |
 | `DRY_RUN` | No (default `false`) | Validate parameters and detect the distro only; change nothing |
 
@@ -94,9 +92,10 @@ After each phase the script records it in the state file and posts its percentag
 ## OpenClaw setup
 
 - **Install.** `https://openclaw.ai/install.sh` is downloaded over HTTPS (TLS 1.2+) to a file, not piped, and run as root with `--version "$OPENCLAW_VERSION" --no-prompt --no-onboard`. It installs Node.js from NodeSource and OpenClaw globally, so the binary is root-owned and the agent cannot modify it. An exact version already installed is not reinstalled; a dist-tag always re-runs the installer.
-- **Provider key.** The key is written to `/etc/openclaw/openclaw.env` (root, `0600`) under the provider's variable name, for example `ANTHROPIC_API_KEY`.
-- **Onboarding.** As the install user, with the key in the environment only: `openclaw onboard --non-interactive --accept-risk --mode local --auth-choice "$LLM_AUTH_CHOICE" --secret-input-mode ref --gateway-bind loopback --gateway-port 18789 --skip-daemon --skip-skills --skip-health`. With `--secret-input-mode ref`, OpenClaw's config stores a reference to the variable, not the key. Onboarding is skipped once the user has a config; a rotated key only needs the env file, which every run rewrites.
-- **Gateway service.** The script writes its own system unit, `openclaw-gateway.service`: `User=` the install user, `SupplementaryGroups=docker`, `EnvironmentFile=/etc/openclaw/openclaw.env`, `ExecStart=openclaw gateway run --port 18789 --bind loopback`, restart on failure except exit code 78 (invalid config). OpenClaw's own daemon install creates a per-user unit, which needs D-Bus and lingering and fails silently on headless servers.
+- **Gateway token.** A random 64-hex-character token is generated on the first run and written to `/etc/openclaw/openclaw.env` (root, `0600`) as `OPENCLAW_GATEWAY_TOKEN`; re-runs keep it, so paired browsers stay paired.
+- **Onboarding.** As the install user, with the token in the environment only: `openclaw onboard --non-interactive --accept-risk --mode local --auth-choice skip --secret-input-mode ref --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN --gateway-bind lan --gateway-port 18789 --skip-daemon --skip-skills --skip-health`. No model provider is configured: users add one in the Control UI (**Models → Connect provider**). With `--secret-input-mode ref`, OpenClaw's config stores a reference to the variable, not the token. Onboarding is skipped once the user has a config.
+- **Control UI origin.** Every run reads the server's public IPv4 from the Hetzner metadata service and sets `gateway.controlUi.allowedOrigins` to `["http://<ipv4>:18789"]`, which OpenClaw requires for a non-loopback Control UI. IPv6 and TLS are not configured.
+- **Gateway service.** The script writes its own system unit, `openclaw-gateway.service`: `User=` the install user, `SupplementaryGroups=docker`, `EnvironmentFile=/etc/openclaw/openclaw.env`, `ExecStart=openclaw gateway run --port 18789 --bind lan` (all interfaces; OpenClaw refuses a non-loopback bind without gateway auth), restart on failure except exit code 78 (invalid config). OpenClaw's own daemon install creates a per-user unit, which needs D-Bus and lingering and fails silently on headless servers.
 
 ## Kali sandbox configuration
 
@@ -123,14 +122,14 @@ The local image is tagged `openclaw-kali:<hash>`, where the hash covers the base
 - As soon as `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are valid, any later failure is reported, including other invalid parameters, an unsupported distro or a missing root, so the client sees the reason instead of a timeout. A dry run never posts.
 - Events are built in bash rather than with `jq`, so the first event works before preflight installs anything.
 - **Lock:** `/run/openclaw-install.lock`, a directory created atomically, holding the owner's pid. A second run is refused and posts nothing (a `failed` event would end the deployment the first run is still installing). A lock whose pid is gone is taken over.
-- **State:** `/var/lib/openclaw-install/` (`0700`) records each completed phase with a hash of that phase's own inputs: `INSTALL_USER` for all of them, plus `OPENCLAW_VERSION` and `LLM_AUTH_CHOICE` for openclaw, and `KALI_IMAGE` and `KALI_PACKAGES` for kali. A re-run skips completed phases whose inputs are unchanged, so a corrected `KALI_IMAGE` redoes only kali; a new `JOB_ID`, `CALLBACK_URL` or secret redoes nothing. Skipped phases still report their percentage. Verify always runs.
+- **State:** `/var/lib/openclaw-install/` (`0700`) records each completed phase with a hash of that phase's own inputs: `INSTALL_USER` for all of them, plus `OPENCLAW_VERSION` for openclaw, and `KALI_IMAGE` and `KALI_PACKAGES` for kali. A re-run skips completed phases whose inputs are unchanged, so a corrected `KALI_IMAGE` redoes only kali; a new `JOB_ID`, `CALLBACK_URL` or secret redoes nothing. Skipped phases still report their percentage. Verify always runs.
 - **Idempotence:** every phase is safe to repeat: packages are installed only if missing, Docker only if absent or stopped, OpenClaw only if not at the pin, the Kali image only if its tag is missing, and the metadata rules only if absent.
 
 ## Security
 
 - OpenClaw runs as `INSTALL_USER`, a dedicated non-root system user, under a system-level systemd unit.
 - `OPENCLAW_VERSION` pins the install; the official installer is fetched over HTTPS only.
-- **Secrets** (`CALLBACK_TOKEN`, `LLM_API_KEY`) come from the environment only, are unexported right after validation so no child process inherits them, are never passed as arguments or logged, are excluded from the state file, and are redacted from the log tail sent on failure. The provider key's only file on disk is `/etc/openclaw/openclaw.env` (root, `0600`).
+- **Secrets.** `CALLBACK_TOKEN` comes from the environment only, are unexported right after validation so no child process inherits them, are never passed as arguments or logged, are excluded from the state file, and are redacted from the log tail sent on failure. The gateway token is generated on the server, redacted from the log tail too, and its only file on disk is `/etc/openclaw/openclaw.env` (root, `0600`). The Control UI is exposed on the public IP over plain HTTP with token auth plus OpenClaw's per-browser device approval (a browser that is not on the server waits for `openclaw devices approve`); the server firewall should allow port `18789` only from the user's IP.
 - **No shared platform key on the server.** The events route accepts only the per-deployment `CALLBACK_TOKEN`, which expires at the deployment's deadline.
 - **Metadata service.** user_data, which carries the secrets, stays readable from `169.254.169.254` for the server's life. `openclaw-metadata-block.service` drops that traffic from Docker containers (`DOCKER-USER` chain) and from every non-root user (`OUTPUT` with `--uid-owner`), at every boot and Docker restart. Verify fails if either can still reach it.
 - **Docker group.** The gateway's user is in the `docker` group because OpenClaw starts sandbox containers, which makes that user root-equivalent on the host. This is inherent to OpenClaw's Docker backend. The sandbox containers themselves get no Docker socket and no host directories.
@@ -153,7 +152,7 @@ Hetzner's user_data limit is 32 KiB, so user_data stays a small stub: it receive
 
 - `API_KEY` sent as `x-api-key` is replaced by the per-deployment `CALLBACK_TOKEN` sent as a bearer token; the shared platform key never reaches a server.
 - Event names follow the provisioner's events route: `event` with `succeeded` and `failed`, instead of `status` with `success` and `failure`.
-- Added `LLM_AUTH_CHOICE` and `LLM_API_KEY` (model credentials) and `KALI_PACKAGES` (tools built into the image).
+- Added `KALI_PACKAGES` (tools built into the image). `LLM_AUTH_CHOICE` and `LLM_API_KEY` were added and later removed (2026-11-15): the Control UI is exposed on the public IP with token auth, and users connect model providers there.
 - Distro detection uses `ID` only, not `ID_LIKE`.
 - The state file moved from `/var/run` (wiped at reboot) to `/var/lib/openclaw-install/`; the lock is in `/run`.
 - The `EXIT` trap posts a failure only for a non-zero exit, once.

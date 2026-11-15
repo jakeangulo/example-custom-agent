@@ -22,8 +22,6 @@ set_valid_env() {
   export CALLBACK_URL="https://api.example.test/deployments/d-1/events"
   export CALLBACK_TOKEN="tok_0123456789abcdefABCDEF"
   export JOB_ID="d-01JBX7Q8M4N2R5T6V7W8X9Y0Z1"
-  export LLM_AUTH_CHOICE="apiKey"
-  export LLM_API_KEY="sk-ant-test-secret-value"
   unset INSTALL_USER KALI_PACKAGES DRY_RUN
 }
 

@@ -7,7 +7,7 @@ SCRIPT_VERSION="${SCRIPT_VERSION:-dev}"
 # redact TEXT: replaces every secret value in TEXT with [REDACTED].
 redact() {
   local text="$1" secret
-  for secret in "${CALLBACK_TOKEN:-}" "${LLM_API_KEY:-}"; do
+  for secret in "${CALLBACK_TOKEN:-}" "${GATEWAY_TOKEN:-}"; do
     [[ -n "$secret" ]] && text="${text//"$secret"/[REDACTED]}"
   done
   printf '%s' "$text"

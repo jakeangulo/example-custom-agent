@@ -12,7 +12,7 @@ SupplementaryGroups=docker
 WorkingDirectory=@HOME@
 Environment=HOME=@HOME@
 EnvironmentFile=/etc/openclaw/openclaw.env
-ExecStart=@OPENCLAW_BIN@ gateway run --port @PORT@ --bind loopback
+ExecStart=@OPENCLAW_BIN@ gateway run --port @PORT@ --bind lan
 Restart=on-failure
 RestartSec=5
 # 78 means invalid configuration; restarting would only loop.

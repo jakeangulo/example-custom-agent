@@ -9,8 +9,6 @@
 # Environment:
 #   HCLOUD_TOKEN       Hetzner API token (read-write), for example
 #                      HCLOUD_TOKEN=$(security find-generic-password -s <service> -w)
-#   LLM_AUTH_CHOICE    as for install.sh
-#   LLM_API_KEY        as for install.sh
 #   GIT_REF            commit to test (default: HEAD of this checkout)
 #   GIT_URL            default https://gitlab.com/appyfic/example-custom-agent.git
 #   OPENCLAW_VERSION   default latest
@@ -30,7 +28,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-: "${HCLOUD_TOKEN:?set HCLOUD_TOKEN}" "${LLM_AUTH_CHOICE:?}" "${LLM_API_KEY:?}"
+: "${HCLOUD_TOKEN:?set HCLOUD_TOKEN}"
 export HCLOUD_TOKEN
 GIT_REF="${GIT_REF:-$(git -C "$REPO" rev-parse HEAD)}"
 GIT_URL="${GIT_URL:-https://gitlab.com/appyfic/example-custom-agent.git}"
@@ -126,8 +124,7 @@ user_data() { # user_data JOB KALI_IMAGE -> file
   block="$(
     printf '      %s=%q\n' INSTALL_REPO_URL "$GIT_URL" INSTALL_REPO_REF "$GIT_REF" INSTALL_SCRIPT install.sh \
       OPENCLAW_VERSION "$OPENCLAW_VERSION" KALI_IMAGE "$2" KALI_PACKAGES "$KALI_PACKAGES" \
-      CALLBACK_URL "$RECEIVER/events/$1" CALLBACK_TOKEN "$TOKEN" JOB_ID "$1" \
-      LLM_AUTH_CHOICE "$LLM_AUTH_CHOICE" LLM_API_KEY "$LLM_API_KEY"
+      CALLBACK_URL "$RECEIVER/events/$1" CALLBACK_TOKEN "$TOKEN" JOB_ID "$1"
   )"
   BLOCK="$block" awk '/^      [A-Z_]+=/ { if (!done) { print ENVIRON["BLOCK"]; done = 1 } next } { print }' \
     "$REPO/cloud-init/user-data.example.yaml" > "$f"
@@ -165,11 +162,11 @@ check_success() { # check_success JOB IP DISTRO
     grep -q non-main && pass "$name sandbox configured" || fail "$name sandbox config missing"
   ssh_to "$ip" "runuser -u openclaw -- timeout 5 bash -c '</dev/tcp/169.254.169.254/80'" 2>/dev/null &&
     fail "$name metadata reachable by openclaw" || pass "$name metadata blocked for openclaw"
-  # The secrets may exist only in the env file (and the receiver).
+  # The callback token must not survive the install anywhere on the server.
   wait_scrubbed "$ip" || fail "$name bootstrap env file was not removed"
   local leaks
-  leaks="$(ssh_to "$ip" "grep -rlsF -e '$LLM_API_KEY' -e '$TOKEN' /etc /var/log /var/lib /home /root /opt /tmp 2>/dev/null | grep -vx /etc/openclaw/openclaw.env" || true)"
-  [[ -z "$leaks" ]] && pass "$name secrets only in the env file" || fail "$name secrets found in: $leaks"
+  leaks="$(ssh_to "$ip" "grep -rlsF -e '$TOKEN' /etc /var/log /var/lib /home /root /opt /tmp 2>/dev/null" || true)"
+  [[ -z "$leaks" ]] && pass "$name callback token removed" || fail "$name callback token found in: $leaks"
 }
 
 run_distro() { # run_distro DISTRO -> sets IP_<distro>
@@ -196,9 +193,9 @@ negative_cases() { # on one distro: bad image, resume after fixing it, lock
   fi
 
   # Re-run by hand with the image fixed; secrets go over ssh stdin, not argv.
-  local env="OPENCLAW_VERSION=$OPENCLAW_VERSION KALI_IMAGE=$KALI_IMAGE KALI_PACKAGES='$KALI_PACKAGES' CALLBACK_URL=$RECEIVER/events/$job-resume JOB_ID=$job-resume LLM_AUTH_CHOICE=$LLM_AUTH_CHOICE"
-  printf 'export CALLBACK_TOKEN=%q LLM_API_KEY=%q\nexport %s\nbash /opt/openclaw-installer/install.sh\n' \
-    "$TOKEN" "$LLM_API_KEY" "$env" > "$WORK/resume.sh"
+  local env="OPENCLAW_VERSION=$OPENCLAW_VERSION KALI_IMAGE=$KALI_IMAGE KALI_PACKAGES='$KALI_PACKAGES' CALLBACK_URL=$RECEIVER/events/$job-resume JOB_ID=$job-resume"
+  printf 'export CALLBACK_TOKEN=%q\nexport %s\nbash /opt/openclaw-installer/install.sh\n' \
+    "$TOKEN" "$env" > "$WORK/resume.sh"
   # Two runs at once: the second must be refused by the lock.
   ssh_to "$ip" bash -s < "$WORK/resume.sh" > "$WORK/resume.log" 2>&1 &
   local first=$!

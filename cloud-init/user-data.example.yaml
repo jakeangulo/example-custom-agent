@@ -24,8 +24,6 @@ write_files:
       CALLBACK_URL='https://receiver.example.com/deployments/demo-1/events'
       CALLBACK_TOKEN='replace-with-a-long-random-token'
       JOB_ID='demo-1'
-      LLM_AUTH_CHOICE='apiKey'
-      LLM_API_KEY='replace-with-the-provider-key'
 
 runcmd:
   - - bash

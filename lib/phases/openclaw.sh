@@ -1,15 +1,18 @@
 # shellcheck shell=bash
-# 60%: OpenClaw at the pinned version, onboarded for the install user, and its
-# gateway as a system service.
+# 60%: OpenClaw at the pinned version, onboarded for the install user with no
+# model provider (users connect one in the Control UI), and its gateway as a
+# system service serving the Control UI on the server's public IPv4.
 
 OPENCLAW_INSTALLER_URL="https://openclaw.ai/install.sh"
 GATEWAY_PORT=18789
 OPENCLAW_ENV_FILE="/etc/openclaw/openclaw.env"
+PUBLIC_IPV4_URL="http://169.254.169.254/hetzner/v1/metadata/public-ipv4"
 
 phase_openclaw() {
   install_openclaw
   write_openclaw_env
   onboard_openclaw
+  allow_control_ui_origin
   install_gateway_service
 }
 
@@ -49,16 +52,16 @@ as_install_user() {
   )
 }
 
-# The provider key lives only in this root-only file, which systemd reads
-# before dropping to the install user; OpenClaw's config holds a reference.
+# The gateway token lives only in this root-only file, which systemd reads
+# before dropping to the install user; OpenClaw's config holds a reference. It
+# is generated once and kept on re-runs, so paired browsers stay paired.
 write_openclaw_env() {
-  local file="$OCI_ROOT$OPENCLAW_ENV_FILE" name value
-  name="$(llm_key_env_name "$LLM_AUTH_CHOICE")"
-  value="${LLM_API_KEY//\\/\\\\}"
-  value="${value//\"/\\\"}"
+  local file="$OCI_ROOT$OPENCLAW_ENV_FILE"
+  GATEWAY_TOKEN="$(sed -n 's/^OPENCLAW_GATEWAY_TOKEN="\(.*\)"$/\1/p' "$file" 2>/dev/null || true)"
+  [[ -n "$GATEWAY_TOKEN" ]] || GATEWAY_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
   mkdir -p "$(dirname "$file")"
   chmod 700 "$(dirname "$file")"
-  (umask 077 && printf '%s="%s"\n' "$name" "$value" > "$file")
+  (umask 077 && printf 'OPENCLAW_GATEWAY_TOKEN="%s"\n' "$GATEWAY_TOKEN" > "$file")
   chmod 600 "$file"
 }
 
@@ -68,18 +71,29 @@ onboard_openclaw() {
     log "OpenClaw already onboarded for $INSTALL_USER"
     return 0
   fi
-  local name
-  name="$(llm_key_env_name "$LLM_AUTH_CHOICE")"
-  log "onboarding OpenClaw for $INSTALL_USER with $LLM_AUTH_CHOICE"
-  # A subshell keeps the key out of this script's environment; it reaches
+  log "onboarding OpenClaw for $INSTALL_USER, no model provider, gateway on the LAN bind with token auth"
+  # A subshell keeps the token out of this script's environment; it reaches
   # onboarding through the environment only, never the command line.
   (
-    export "$name=$LLM_API_KEY"
+    export OPENCLAW_GATEWAY_TOKEN="$GATEWAY_TOKEN"
     as_install_user "$OPENCLAW_BIN" onboard --non-interactive --accept-risk \
-      --mode local --auth-choice "$LLM_AUTH_CHOICE" --secret-input-mode ref \
-      --gateway-bind loopback --gateway-port "$GATEWAY_PORT" \
+      --mode local --auth-choice skip --secret-input-mode ref \
+      --gateway-auth token --gateway-token-ref-env OPENCLAW_GATEWAY_TOKEN \
+      --gateway-bind lan --gateway-port "$GATEWAY_PORT" \
       --skip-daemon --skip-skills --skip-health
   )
+}
+
+# The Control UI only accepts browsers from listed origins; a LAN bind needs
+# the address users type. Runs every time, so a re-run fixes a changed IP.
+# shortcut: IPv4 only, plain HTTP; add the IPv6 origin or a TLS front when needed.
+allow_control_ui_origin() {
+  local ip
+  ip="$(curl -fsS --max-time 5 "$PUBLIC_IPV4_URL")" || die "could not read the public IPv4 from $PUBLIC_IPV4_URL"
+  [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "the metadata service returned no IPv4 address"
+  CONTROL_UI_URL="http://$ip:$GATEWAY_PORT"
+  as_install_user "$OPENCLAW_BIN" config set gateway.controlUi.allowedOrigins "[\"$CONTROL_UI_URL\"]" --strict-json
+  log "Control UI: $CONTROL_UI_URL"
 }
 
 install_gateway_service() {
