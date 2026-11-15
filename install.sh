@@ -134,11 +134,11 @@ main() {
   [[ $EUID -eq 0 || -n "$OCI_ROOT" ]] || die "must run as root"
   detect_os
   # Secrets stay shell variables: no child process inherits them.
-  export -n CALLBACK_TOKEN LLM_API_KEY
+  export -n CALLBACK_TOKEN
 
   if [[ "$DRY_RUN" == true ]]; then
     log "dry run: parameters valid; distro $OS_ID uses $OS_FAMILY"
-    log "dry run: would run phases ${PHASES[*]%%:*} as user $INSTALL_USER"
+    log "dry run: would run phases ${PHASES[*]%%:*}"
     exit 0
   fi
 

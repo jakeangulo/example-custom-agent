@@ -43,7 +43,7 @@ EOF
 
 @test "the sandbox image named in OpenClaw's config is started" {
   phase_verify
-  grep -q '^runuser -u openclaw -- .*openclaw config get agents.defaults.sandbox.docker.image --json$' "$SHIM_LOG"
+  grep -q '^openclaw config get agents.defaults.sandbox.docker.image --json$' "$SHIM_LOG"
   grep -qx 'docker run --rm --network none openclaw-kali:abc123def456 true' "$SHIM_LOG"
 }
 
@@ -90,9 +90,9 @@ EOF
   grep -q '^docker run --rm --network bridge openclaw-kali:abc123def456 ' "$SHIM_LOG"
 }
 
-@test "metadata reachable by the install user fails verification" {
+@test "metadata reachable by non-root users fails verification" {
   export HOST_METADATA_RC=0
   run phase_verify
   [ "$status" -ne 0 ]
-  [[ "$output" == *"metadata"*"openclaw"* ]]
+  [[ "$output" == *"metadata"*"non-root"* ]]
 }

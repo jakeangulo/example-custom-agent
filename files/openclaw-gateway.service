@@ -6,13 +6,10 @@ Requires=docker.service
 
 [Service]
 Type=simple
-User=@USER@
-Group=@USER@
-SupplementaryGroups=docker
-WorkingDirectory=@HOME@
-Environment=HOME=@HOME@
-EnvironmentFile=/etc/openclaw/openclaw.env
-ExecStart=@OPENCLAW_BIN@ gateway run --port @PORT@ --bind loopback
+User=root
+WorkingDirectory=/root
+Environment=HOME=/root
+ExecStart=@OPENCLAW_BIN@ gateway run --port @PORT@ --bind lan
 Restart=on-failure
 RestartSec=5
 # 78 means invalid configuration; restarting would only loop.

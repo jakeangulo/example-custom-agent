@@ -1,15 +1,16 @@
 # shellcheck shell=bash
-# 60%: OpenClaw at the pinned version, onboarded for the install user, and its
-# gateway as a system service.
+# 60%: OpenClaw at the pinned version, run as root (OpenClaw's default), onboarded
+# with no model provider (users connect one in the Control UI), and its gateway
+# as a system service serving the Control UI on the server's public IPv4.
 
 OPENCLAW_INSTALLER_URL="https://openclaw.ai/install.sh"
 GATEWAY_PORT=18789
-OPENCLAW_ENV_FILE="/etc/openclaw/openclaw.env"
+PUBLIC_IPV4_URL="http://169.254.169.254/hetzner/v1/metadata/public-ipv4"
 
 phase_openclaw() {
   install_openclaw
-  write_openclaw_env
   onboard_openclaw
+  allow_control_ui_origin
   install_gateway_service
 }
 
@@ -40,53 +41,37 @@ resolve_openclaw_bin() {
   OPENCLAW_BIN="$(command -v openclaw)" || die "openclaw binary not found on PATH after install"
 }
 
-# as_install_user CMD...: runs CMD as the install user, with its home.
-as_install_user() {
-  (
-    export HOME="/home/$INSTALL_USER"
-    cd /
-    runuser -u "$INSTALL_USER" -- "$@"
-  )
-}
-
-# The provider key lives only in this root-only file, which systemd reads
-# before dropping to the install user; OpenClaw's config holds a reference.
-write_openclaw_env() {
-  local file="$OCI_ROOT$OPENCLAW_ENV_FILE" name value
-  name="$(llm_key_env_name "$LLM_AUTH_CHOICE")"
-  value="${LLM_API_KEY//\\/\\\\}"
-  value="${value//\"/\\\"}"
-  mkdir -p "$(dirname "$file")"
-  chmod 700 "$(dirname "$file")"
-  (umask 077 && printf '%s="%s"\n' "$name" "$value" > "$file")
-  chmod 600 "$file"
-}
-
 onboard_openclaw() {
-  local home="/home/$INSTALL_USER"
-  if [[ -f "$OCI_ROOT$home/.openclaw/openclaw.json" ]]; then
-    log "OpenClaw already onboarded for $INSTALL_USER"
+  if [[ -f "$OCI_ROOT/root/.openclaw/openclaw.json" ]]; then
+    log "OpenClaw already onboarded"
     return 0
   fi
-  local name
-  name="$(llm_key_env_name "$LLM_AUTH_CHOICE")"
-  log "onboarding OpenClaw for $INSTALL_USER with $LLM_AUTH_CHOICE"
-  # A subshell keeps the key out of this script's environment; it reaches
-  # onboarding through the environment only, never the command line.
-  (
-    export "$name=$LLM_API_KEY"
-    as_install_user "$OPENCLAW_BIN" onboard --non-interactive --accept-risk \
-      --mode local --auth-choice "$LLM_AUTH_CHOICE" --secret-input-mode ref \
-      --gateway-bind loopback --gateway-port "$GATEWAY_PORT" \
-      --skip-daemon --skip-skills --skip-health
-  )
+  log "onboarding OpenClaw: no model provider, gateway on the LAN bind with token auth"
+  # With no auth flags OpenClaw generates the gateway token into its own config
+  # (token mode), so the standard CLI (gateway auth-token, devices, dashboard)
+  # works as root.
+  "$OPENCLAW_BIN" onboard --non-interactive --accept-risk \
+    --mode local --auth-choice skip \
+    --gateway-bind lan --gateway-port "$GATEWAY_PORT" \
+    --skip-daemon --skip-skills --skip-health
+}
+
+# The Control UI only accepts browsers from listed origins; a LAN bind needs
+# the address users type. Runs every time, so a re-run fixes a changed IP.
+# shortcut: IPv4 only, plain HTTP; add the IPv6 origin or a TLS front when needed.
+allow_control_ui_origin() {
+  local ip
+  ip="$(curl -fsS --max-time 5 "$PUBLIC_IPV4_URL")" || die "could not read the public IPv4 from $PUBLIC_IPV4_URL"
+  [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "the metadata service returned no IPv4 address"
+  CONTROL_UI_URL="http://$ip:$GATEWAY_PORT"
+  "$OPENCLAW_BIN" config set gateway.controlUi.allowedOrigins "[\"$CONTROL_UI_URL\"]" --strict-json
+  log "Control UI: $CONTROL_UI_URL"
 }
 
 install_gateway_service() {
   local unit="$OCI_ROOT/etc/systemd/system/openclaw-gateway.service"
   mkdir -p "$(dirname "$unit")"
-  sed -e "s|@USER@|$INSTALL_USER|g" -e "s|@HOME@|/home/$INSTALL_USER|g" \
-    -e "s|@OPENCLAW_BIN@|$OPENCLAW_BIN|g" -e "s|@PORT@|$GATEWAY_PORT|g" \
+  sed -e "s|@OPENCLAW_BIN@|$OPENCLAW_BIN|g" -e "s|@PORT@|$GATEWAY_PORT|g" \
     "$SCRIPT_DIR/files/openclaw-gateway.service" > "$unit"
   chmod 644 "$unit"
   systemctl daemon-reload

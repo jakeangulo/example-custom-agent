@@ -38,11 +38,11 @@ body() { cat "$CALL_DIR/$1.body"; }
 }
 
 @test "a failed event carries the exit code and a redacted log tail" {
-  post_event failed 60 openclaw "install failed" 7 $'line one\nkey='"$LLM_API_KEY"$'\ntoken '"$CALLBACK_TOKEN"
+  post_event failed 60 openclaw "install failed" 7 $'line one\ntoken '"$CALLBACK_TOKEN"
   [ "$(body 1 | jq -r .event)" = failed ]
   [ "$(body 1 | jq -r .exit_code)" = 7 ]
   [[ "$(body 1 | jq -r .log_tail)" == *"line one"* ]]
-  ! body 1 | grep -q -e "$LLM_API_KEY" -e "$CALLBACK_TOKEN" || false
+  ! body 1 | grep -q -e "$CALLBACK_TOKEN" || false
   [[ "$(body 1 | jq -r .log_tail)" == *"[REDACTED]"* ]]
 }
 

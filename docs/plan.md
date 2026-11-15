@@ -1,5 +1,9 @@
 # Plan: OpenClaw + Kali installer (`appyfic/example-custom-agent`)
 
+> **Superseded in part (2026-11-15):** `LLM_AUTH_CHOICE` and `LLM_API_KEY` were removed. The gateway now binds to
+> the LAN with token auth and serves the Control UI on the public IP, and users connect model providers there. This plan
+> is kept as the build record; [design.md](design.md) describes the current behaviour.
+
 ## Context
 
 The repo holds only a default README and the design doc `OpenClaw + Kali Installer — Design Document.docx`. We are building the

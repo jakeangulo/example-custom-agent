@@ -11,8 +11,6 @@ phase_docker() {
     pkg_install "${DOCKER_PACKAGES[@]}"
     systemctl enable --now docker
   fi
-  # The gateway starts sandbox containers, so its user needs the Docker socket.
-  usermod -aG docker "$INSTALL_USER"
   install_metadata_block
 }
 

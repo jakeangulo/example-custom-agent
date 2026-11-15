@@ -11,9 +11,9 @@ Supported images: Debian, Ubuntu, Rocky Linux, AlmaLinux, CentOS Stream and Fedo
 | % | Phase | Result |
 | --- | --- | --- |
 | 0 | started | Parameters checked, distro detected |
-| 20 | preflight | Base tools installed, `openclaw` user created |
+| 20 | preflight | Base tools installed |
 | 40 | docker | Docker Engine running, cloud metadata service blocked for containers and non-root users |
-| 60 | openclaw | OpenClaw at the pinned version, onboarded with your model provider, gateway running as `openclaw-gateway.service` |
+| 60 | openclaw | OpenClaw at the pinned version, run as root (its default), onboarded with no model provider, gateway running as `openclaw-gateway.service` with the Control UI on `http://<public IPv4>:18789` |
 | 80 | kali | Kali image (plus `KALI_PACKAGES`) configured as OpenClaw's sandbox |
 | 100 | verify | Everything checked; success reported |
 
@@ -28,15 +28,12 @@ Set them as environment variables; non-secret ones can also be given as options 
 | `OPENCLAW_VERSION` | Yes | OpenClaw version or dist-tag, e.g. `2026.10.2` |
 | `KALI_IMAGE` | Yes | Kali image with tag or digest, e.g. `kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c` (Kali publishes only rolling tags such as `latest`, so pin a digest) |
 | `KALI_PACKAGES` | No | Packages to add to the image; default `kali-linux-headless` (several GB, ~10 min). Empty uses the image as-is |
-| `LLM_AUTH_CHOICE` | Yes | `apiKey` (Anthropic), `openai-api-key`, `gemini-api-key` or `mistral-api-key` |
-| `LLM_API_KEY` | Yes, secret | The provider's API key |
 | `CALLBACK_URL` | Yes | HTTPS URL that receives progress events |
 | `CALLBACK_TOKEN` | Yes, secret | Bearer token for `CALLBACK_URL` |
 | `JOB_ID` | Yes | ID echoed in every event |
-| `INSTALL_USER` | No | User OpenClaw runs as; default `openclaw` |
 | `DRY_RUN` | No | `true` checks parameters and the distro without changing anything |
 
-With the provisioner, `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are set for you; send the rest in the request's `install.params` and `install.secrets` (`LLM_API_KEY`).
+With the provisioner, `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are set for you; send the rest in the request's `install.params`. Model provider credentials are not parameters: users add them in the Control UI (see below).
 
 ## Running it
 
@@ -52,14 +49,27 @@ hcloud server create --name kali-agent --type cpx31 --image ubuntu-24.04 --locat
 On an existing server, as root:
 
 ```bash
-export OPENCLAW_VERSION=2026.10.2 KALI_IMAGE=kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c LLM_AUTH_CHOICE=apiKey \
+export OPENCLAW_VERSION=2026.10.2 KALI_IMAGE=kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c \
        CALLBACK_URL=https://… JOB_ID=manual-1
-read -rs LLM_API_KEY && export LLM_API_KEY
 read -rs CALLBACK_TOKEN && export CALLBACK_TOKEN
 ./install.sh
 ```
 
 Logs are in `/var/log/openclaw-install.log`.
+
+## Using the Control UI
+
+OpenClaw runs as root, its default, so OpenClaw's own documentation and commands apply on the server unchanged. The gateway serves the Control UI on `http://<server public IPv4>:18789`, on all interfaces with token auth. Open port `18789` only to your own IP in the server's firewall (with the provisioner, add a `tcp` rule for port `18789` next to the SSH rule).
+
+To log in the first time, as root on the server:
+
+1. `openclaw gateway auth-token --show` prints the gateway token; paste it into the Control UI's **Gateway secret** field.
+2. The browser then waits for approval: `openclaw devices list`, then `openclaw devices approve <requestId>`. The browser is remembered after that.
+3. Add a model provider in **Models → Connect provider**.
+
+Alternatively, `openclaw dashboard --json` prints a one-time `browserUrl` that pairs a browser without a token; for this LAN bind it points at `127.0.0.1`, so replace that with the server's public IPv4 in the address and in the `gatewayUrl` value, as OpenClaw's docs describe.
+
+The UI is plain HTTP, so traffic crosses the network unencrypted; keep the firewall rule limited to your IP, or put the UI behind TLS (for example Tailscale Serve).
 
 ## Events
 
@@ -83,9 +93,9 @@ Each event is a `POST` to `CALLBACK_URL` with `Authorization: Bearer $CALLBACK_T
 
 ## Security notes
 
-- Secrets are never logged or passed as command-line arguments. The provider key is stored only in `/etc/openclaw/openclaw.env` (root, `0600`); OpenClaw's config refers to it by name.
-- user_data stays readable from the cloud metadata service for the server's whole life, so the installer blocks that service for containers and non-root users, and checks the block works.
-- The `openclaw` user is in the `docker` group so the gateway can start sandbox containers, which makes it root-equivalent on the host.
+- `CALLBACK_TOKEN` is never logged or passed as a command-line argument. The gateway token and any provider credentials added in the Control UI are stored by OpenClaw in root's config.
+- user_data stays readable from the cloud metadata service for the server's whole life, so the installer blocks that service for containers and non-root users, and checks the block works. Root, and so OpenClaw, can still read it.
+- OpenClaw runs as root, so anything the agent does on the host runs as root; only its Kali sandbox containers are isolated.
 - **Kali tools can trigger abuse reports.** Scans launched from a Hetzner IP are traced back to the server's owner. Only scan systems you are authorised to test.
 
 ## Development
