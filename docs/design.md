@@ -47,7 +47,7 @@ Every input is a parameter: an environment variable, or an option that takes pre
 | Parameter | Required | Description |
 | --- | --- | --- |
 | `OPENCLAW_VERSION` | Yes | Version, dist-tag or spec, passed to OpenClaw's official installer |
-| `KALI_IMAGE` | Yes | Full image reference with a tag or digest, e.g. `kalilinux/kali-rolling:2025.4` |
+| `KALI_IMAGE` | Yes | Full image reference with a tag or digest, e.g. `kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c`; Kali publishes only rolling tags (`latest`, per-arch), so pin a digest for repeatable installs |
 | `KALI_PACKAGES` | No (default `kali-linux-headless`) | Packages built into a local image on top of `KALI_IMAGE`; empty means use `KALI_IMAGE` as-is |
 | `CALLBACK_URL` | Yes | HTTPS events route; set by the provisioner |
 | `CALLBACK_TOKEN` | Yes, secret | Per-deployment bearer token for the events route; set by the provisioner |
