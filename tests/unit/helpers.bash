@@ -22,7 +22,7 @@ set_valid_env() {
   export CALLBACK_URL="https://api.example.test/deployments/d-1/events"
   export CALLBACK_TOKEN="tok_0123456789abcdefABCDEF"
   export JOB_ID="d-01JBX7Q8M4N2R5T6V7W8X9Y0Z1"
-  unset INSTALL_USER KALI_PACKAGES DRY_RUN
+  unset KALI_PACKAGES DRY_RUN
 }
 
 # shim NAME [EXIT_CODE] [STDOUT]: a fake command that logs "NAME args" and

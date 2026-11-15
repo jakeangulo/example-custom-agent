@@ -48,7 +48,7 @@ write_sandbox_config() {
                capDrop: $ARGS.positional, binds: []}}}}}' "${SANDBOX_CAP_DROP[@]}" > "$dir/sandbox.json"
   chmod 644 "$dir/sandbox.json"
   log "writing the sandbox config (image $image)"
-  as_install_user "$OPENCLAW_BIN" config patch --file "$dir/sandbox.json"
-  as_install_user "$OPENCLAW_BIN" config validate
+  "$OPENCLAW_BIN" config patch --file "$dir/sandbox.json"
+  "$OPENCLAW_BIN" config validate
   rm -rf "$dir"
 }

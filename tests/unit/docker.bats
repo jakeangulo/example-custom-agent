@@ -4,7 +4,7 @@ load helpers
 
 setup() {
   common_setup
-  for c in apt-get dnf usermod iptables; do shim "$c"; done
+  for c in apt-get dnf iptables; do shim "$c"; done
   shim dpkg 0 amd64
   # systemctl: is-active answers DOCKER_ACTIVE_RC (default 3, not running).
   shim_script systemctl <<'EOF2'
@@ -54,10 +54,9 @@ EOF2
   ! grep '^curl' "$SHIM_LOG" | grep -v -- "--proto =https --tlsv1.2" || false
 }
 
-@test "docker is enabled and started, and the install user joins the docker group" {
+@test "docker is enabled and started" {
   phase_docker
   grep -qx 'systemctl enable --now docker' "$SHIM_LOG"
-  grep -qx 'usermod -aG docker openclaw' "$SHIM_LOG"
 }
 
 @test "an installed, running docker is not reinstalled" {
@@ -65,7 +64,6 @@ EOF2
   export DOCKER_ACTIVE_RC=0
   phase_docker
   ! grep -q 'docker-ce' "$SHIM_LOG" || false
-  grep -qx 'usermod -aG docker openclaw' "$SHIM_LOG"
 }
 
 @test "the metadata block is installed as a boot-time service and applied" {

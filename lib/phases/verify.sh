@@ -18,15 +18,15 @@ phase_verify() {
   wait_for_gateway
 
   local image
-  image="$(as_install_user "$OPENCLAW_BIN" config get agents.defaults.sandbox.docker.image --json | jq -r .)"
+  image="$("$OPENCLAW_BIN" config get agents.defaults.sandbox.docker.image --json | jq -r .)"
   [[ -n "$image" && "$image" != null ]] || die "no sandbox image in OpenClaw's config"
   docker run --rm --network none "$image" true || die "sandbox image $image does not start"
 
   if docker run --rm --network bridge "$image" bash -c "$METADATA_PROBE" 2>/dev/null; then
     die "the metadata service is reachable from a sandbox container"
   fi
-  if runuser -u "$INSTALL_USER" -- bash -c "$METADATA_PROBE" 2>/dev/null; then
-    die "the metadata service is reachable by $INSTALL_USER"
+  if runuser -u nobody -- bash -c "$METADATA_PROBE" 2>/dev/null; then
+    die "the metadata service is reachable by non-root users"
   fi
   log "verified: OpenClaw $("$OPENCLAW_BIN" --version), gateway healthy, sandbox $image, metadata blocked"
 }

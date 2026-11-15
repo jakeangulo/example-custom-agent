@@ -4,7 +4,7 @@ shellcheck:
   stage: test
   image: koalaman/shellcheck-alpine:stable
   script:
-    - shellcheck -x install.sh files/openclaw-metadata-block files/openclaw-cli tests/hetzner/run-matrix.sh
+    - shellcheck -x install.sh files/openclaw-metadata-block tests/hetzner/run-matrix.sh
 
 unit-tests:
   stage: test

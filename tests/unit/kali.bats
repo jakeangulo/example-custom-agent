@@ -88,16 +88,17 @@ built_tag() { grep '^docker build' "$SHIM_LOG" | sed -E 's/.* -t ([^ ]+) .*/\1/'
   done
 }
 
-@test "the config is applied and validated as the install user, then the gateway restarts" {
+@test "the config is applied and validated as root, then the gateway restarts" {
   phase_kali
-  grep -q "^runuser -u openclaw -- .*openclaw config patch --file " "$SHIM_LOG"
-  grep -q "^runuser -u openclaw -- .*openclaw config validate$" "$SHIM_LOG"
-  [ "$(grep -n '^runuser.*config validate' "$SHIM_LOG" | cut -d: -f1)" -gt "$(grep -n '^runuser.*config patch' "$SHIM_LOG" | cut -d: -f1)" ]
-  [ "$(grep -n 'restart openclaw-gateway' "$SHIM_LOG" | cut -d: -f1)" -gt "$(grep -n '^runuser.*config validate' "$SHIM_LOG" | cut -d: -f1)" ]
+  grep -q "^openclaw config patch --file " "$SHIM_LOG"
+  grep -q "^openclaw config validate$" "$SHIM_LOG"
+  [ "$(grep -n '^openclaw config validate' "$SHIM_LOG" | cut -d: -f1)" -gt "$(grep -n '^openclaw config patch' "$SHIM_LOG" | cut -d: -f1)" ]
+  [ "$(grep -n 'restart openclaw-gateway' "$SHIM_LOG" | cut -d: -f1)" -gt "$(grep -n '^openclaw config validate' "$SHIM_LOG" | cut -d: -f1)" ]
+  ! grep -q '^runuser' "$SHIM_LOG" || false
 }
 
 @test "on a resumed run the openclaw binary is found on PATH" {
   unset OPENCLAW_BIN
   phase_kali
-  grep -q "^runuser -u openclaw -- $SHIM_DIR/openclaw config patch" "$SHIM_LOG"
+  grep -q "^openclaw config patch" "$SHIM_LOG"
 }

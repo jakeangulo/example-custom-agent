@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# 20%: base tools and the install user.
+# 20%: base tools.
 
 phase_preflight() {
   # Each needed command and the package that provides it, per family.
@@ -16,8 +16,4 @@ phase_preflight() {
     pkg_install "${packages[@]}"
   fi
 
-  if ! id -u "$INSTALL_USER" >/dev/null 2>&1; then
-    log "creating system user $INSTALL_USER"
-    useradd --system --create-home --home-dir "/home/$INSTALL_USER" --shell /usr/sbin/nologin "$INSTALL_USER"
-  fi
 }

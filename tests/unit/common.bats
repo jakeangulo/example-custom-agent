@@ -16,15 +16,14 @@ setup() {
   [ "$status" -eq 0 ]
   parse_args
   validate_params
-  [ "$INSTALL_USER" = "openclaw" ]
   [ "$KALI_PACKAGES" = "kali-linux-headless" ]
   [ "$DRY_RUN" = "false" ]
 }
 
 @test "a flag overrides the environment for non-secret parameters" {
-  parse_args --openclaw-version 2026.11.0 --install-user agent --dry-run
+  parse_args --openclaw-version 2026.11.0 --kali-packages nmap --dry-run
   [ "$OPENCLAW_VERSION" = "2026.11.0" ]
-  [ "$INSTALL_USER" = "agent" ]
+  [ "$KALI_PACKAGES" = "nmap" ]
   [ "$DRY_RUN" = "true" ]
 }
 
@@ -67,8 +66,6 @@ setup() {
     "CALLBACK_TOKEN=short"
     "CALLBACK_TOKEN=has space in it 0123456789"
     "JOB_ID=bad id"
-    "INSTALL_USER=root"
-    "INSTALL_USER=Bad-User"
     "KALI_PACKAGES=nmap; curl evil"
     "DRY_RUN=yes"
   )
@@ -165,15 +162,6 @@ setup() {
   parse_args; validate_params
   ! state_is_done openclaw || false
   state_is_done docker
-}
-
-@test "changing the install user redoes every phase" {
-  parse_args; validate_params
-  state_init
-  local p; for p in preflight docker openclaw kali; do state_mark_done "$p"; done
-  export INSTALL_USER=agent
-  parse_args; validate_params
-  for p in preflight docker openclaw kali; do ! state_is_done "$p" || false; done
 }
 
 @test "a new job ID or callback URL keeps completed phases" {

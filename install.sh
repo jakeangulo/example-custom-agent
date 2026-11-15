@@ -138,7 +138,7 @@ main() {
 
   if [[ "$DRY_RUN" == true ]]; then
     log "dry run: parameters valid; distro $OS_ID uses $OS_FAMILY"
-    log "dry run: would run phases ${PHASES[*]%%:*} as user $INSTALL_USER"
+    log "dry run: would run phases ${PHASES[*]%%:*}"
     exit 0
   fi
 

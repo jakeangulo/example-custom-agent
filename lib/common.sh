@@ -34,7 +34,6 @@ upper case (for example --kali-image or KALI_IMAGE); the option wins.
   --kali-image REF       Kali image, registry/repo:tag or @digest (required)
   --callback-url URL     HTTPS events endpoint (required)
   --job-id ID            Deployment ID echoed in every event (required)
-  --install-user U       User OpenClaw runs as (default: openclaw)
   --kali-packages "P"    Packages to add to the Kali image (default: kali-linux-headless; "" = none)
   --dry-run              Validate and detect only; change nothing
 
@@ -61,8 +60,7 @@ parse_args() {
         ;;
       --help | -h) usage; exit 0 ;;
       --dry-run) DRY_RUN=true; shift; continue ;;
-      --openclaw-version | --kali-image | --callback-url | --job-id | \
-        --install-user | --kali-packages)
+      --openclaw-version | --kali-image | --callback-url | --job-id | --kali-packages)
         if ! $has_val; then
         (($# >= 2)) || die "$opt needs a value"
           val="$2"; shift
@@ -78,7 +76,6 @@ parse_args() {
 # validate_params: applies defaults, then reports every problem at once.
 # Messages name the parameter but never echo a secret's value.
 validate_params() {
-  INSTALL_USER="${INSTALL_USER:-openclaw}"
   KALI_PACKAGES="${KALI_PACKAGES-kali-linux-headless}"
   DRY_RUN="${DRY_RUN:-false}"
 
@@ -97,10 +94,8 @@ validate_params() {
   check CALLBACK_TOKEN '^[A-Za-z0-9._~+/=-]{16,}$' 'must be 16-512 URL-safe characters'
   local token="${CALLBACK_TOKEN:-}"; ((${#token} <= 512)) || errors+=("CALLBACK_TOKEN must be 16-512 URL-safe characters")
   check JOB_ID '^[A-Za-z0-9._:-]{1,128}$' 'must be 1-128 letters, digits or ._:-'
-  check INSTALL_USER '^[a-z_][a-z0-9_-]{0,31}$' 'must be a lowercase user name'
   check KALI_PACKAGES '^[a-z0-9.+ -]*$' 'must be space-separated Debian package names'
   check DRY_RUN '^(true|false)$' 'must be true or false'
-  [[ "$INSTALL_USER" != root ]] || errors+=("INSTALL_USER must not be root")
   unset -f check
 
   if ((${#errors[@]})); then
@@ -148,10 +143,9 @@ sha256() {
 # is redone when one of them changes; IDs, URLs and secrets never redo work.
 phase_inputs() {
   case "$1" in
-    preflight | docker) echo INSTALL_USER ;;
-    openclaw) echo INSTALL_USER OPENCLAW_VERSION ;;
-    kali) echo INSTALL_USER KALI_IMAGE KALI_PACKAGES ;;
-    *) echo INSTALL_USER ;;
+    openclaw) echo OPENCLAW_VERSION ;;
+    kali) echo KALI_IMAGE KALI_PACKAGES ;;
+    *) ;;
   esac
 }
 

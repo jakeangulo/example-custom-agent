@@ -158,10 +158,10 @@ check_success() { # check_success JOB IP DISTRO
     pass "$name events in order" || fail "$name events: $seq"
   ssh_to "$ip" systemctl is-active --quiet openclaw-gateway.service &&
     pass "$name gateway active" || fail "$name gateway not active"
-  ssh_to "$ip" "runuser -u openclaw -- env HOME=/home/openclaw openclaw config get agents.defaults.sandbox.mode" |
+  ssh_to "$ip" "openclaw config get agents.defaults.sandbox.mode" |
     grep -q non-main && pass "$name sandbox configured" || fail "$name sandbox config missing"
-  ssh_to "$ip" "runuser -u openclaw -- timeout 5 bash -c '</dev/tcp/169.254.169.254/80'" 2>/dev/null &&
-    fail "$name metadata reachable by openclaw" || pass "$name metadata blocked for openclaw"
+  ssh_to "$ip" "runuser -u nobody -- timeout 5 bash -c '</dev/tcp/169.254.169.254/80'" 2>/dev/null &&
+    fail "$name metadata reachable by non-root users" || pass "$name metadata blocked for non-root users"
   # The callback token must not survive the install anywhere on the server.
   wait_scrubbed "$ip" || fail "$name bootstrap env file was not removed"
   local leaks

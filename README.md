@@ -11,9 +11,9 @@ Supported images: Debian, Ubuntu, Rocky Linux, AlmaLinux, CentOS Stream and Fedo
 | % | Phase | Result |
 | --- | --- | --- |
 | 0 | started | Parameters checked, distro detected |
-| 20 | preflight | Base tools installed, `openclaw` user created |
+| 20 | preflight | Base tools installed |
 | 40 | docker | Docker Engine running, cloud metadata service blocked for containers and non-root users |
-| 60 | openclaw | OpenClaw at the pinned version, onboarded with no model provider, gateway running as `openclaw-gateway.service` with the Control UI on `http://<public IPv4>:18789` |
+| 60 | openclaw | OpenClaw at the pinned version, run as root (its default), onboarded with no model provider, gateway running as `openclaw-gateway.service` with the Control UI on `http://<public IPv4>:18789` |
 | 80 | kali | Kali image (plus `KALI_PACKAGES`) configured as OpenClaw's sandbox |
 | 100 | verify | Everything checked; success reported |
 
@@ -31,7 +31,6 @@ Set them as environment variables; non-secret ones can also be given as options 
 | `CALLBACK_URL` | Yes | HTTPS URL that receives progress events |
 | `CALLBACK_TOKEN` | Yes, secret | Bearer token for `CALLBACK_URL` |
 | `JOB_ID` | Yes | ID echoed in every event |
-| `INSTALL_USER` | No | User OpenClaw runs as; default `openclaw` |
 | `DRY_RUN` | No | `true` checks parameters and the distro without changing anything |
 
 With the provisioner, `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are set for you; send the rest in the request's `install.params`. Model provider credentials are not parameters: users add them in the Control UI (see below).
@@ -60,17 +59,15 @@ Logs are in `/var/log/openclaw-install.log`.
 
 ## Using the Control UI
 
-The gateway serves OpenClaw's Control UI on `http://<server public IPv4>:18789`, on all interfaces with token auth. Open port `18789` only to your own IP in the server's firewall (with the provisioner, add a `tcp` rule for port `18789` next to the SSH rule).
+OpenClaw runs as root, its default, so OpenClaw's own documentation and commands apply on the server unchanged. The gateway serves the Control UI on `http://<server public IPv4>:18789`, on all interfaces with token auth. Open port `18789` only to your own IP in the server's firewall (with the provisioner, add a `tcp` rule for port `18789` next to the SSH rule).
 
-To log in, run one command on the server and open the link it prints:
+To log in the first time, as root on the server:
 
-```bash
-ssh root@<server-ip> openclaw-cli login
-```
+1. `openclaw gateway auth-token --show` prints the gateway token; paste it into the Control UI's **Gateway secret** field.
+2. The browser then waits for approval: `openclaw devices list`, then `openclaw devices approve <requestId>`. The browser is remembered after that.
+3. Add a model provider in **Models → Connect provider**.
 
-The link works once, within ten minutes, and pairs that browser as administrator: there is no token to paste and no device to approve. Run it again for another browser or after clearing site data. Then add a model provider in **Models → Connect provider**.
-
-For any other OpenClaw command on the server, use `openclaw-cli` instead of `openclaw`, for example `openclaw-cli devices list`. It runs OpenClaw as the `openclaw` user with the gateway token from `/etc/openclaw/openclaw.env`. Plain `openclaw` as root reads root's own config and fails with "gateway token mismatch".
+Alternatively, `openclaw dashboard --json` prints a one-time `browserUrl` that pairs a browser without a token; for this LAN bind it points at `127.0.0.1`, so replace that with the server's public IPv4 in the address and in the `gatewayUrl` value, as OpenClaw's docs describe.
 
 The UI is plain HTTP, so traffic crosses the network unencrypted; keep the firewall rule limited to your IP, or put the UI behind TLS (for example Tailscale Serve).
 
@@ -96,9 +93,9 @@ Each event is a `POST` to `CALLBACK_URL` with `Authorization: Bearer $CALLBACK_T
 
 ## Security notes
 
-- Secrets are never logged or passed as command-line arguments. The gateway token is generated on the server and stored only in `/etc/openclaw/openclaw.env` (root, `0600`); OpenClaw's config refers to it by name. Provider credentials added in the Control UI are stored by OpenClaw itself.
-- user_data stays readable from the cloud metadata service for the server's whole life, so the installer blocks that service for containers and non-root users, and checks the block works.
-- The `openclaw` user is in the `docker` group so the gateway can start sandbox containers, which makes it root-equivalent on the host.
+- `CALLBACK_TOKEN` is never logged or passed as a command-line argument. The gateway token and any provider credentials added in the Control UI are stored by OpenClaw in root's config.
+- user_data stays readable from the cloud metadata service for the server's whole life, so the installer blocks that service for containers and non-root users, and checks the block works. Root, and so OpenClaw, can still read it.
+- OpenClaw runs as root, so anything the agent does on the host runs as root; only its Kali sandbox containers are isolated.
 - **Kali tools can trigger abuse reports.** Scans launched from a Hetzner IP are traced back to the server's owner. Only scan systems you are authorised to test.
 
 ## Development
@@ -106,7 +103,7 @@ Each event is a `POST` to `CALLBACK_URL` with `Authorization: Bearer $CALLBACK_T
 Requirements: `bash` 4+, `bats-core`, `shellcheck`, `jq` (macOS: `brew install bash bats-core shellcheck jq`).
 
 ```bash
-shellcheck -x install.sh files/openclaw-metadata-block files/openclaw-cli
+shellcheck -x install.sh files/openclaw-metadata-block
 bats tests/unit
 ```
 
