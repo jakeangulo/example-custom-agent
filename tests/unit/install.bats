@@ -83,7 +83,7 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
 
 @test "a run is refused while another holds the lock, and posts nothing" {
   mkdir -p "$OCI_ROOT/run/openclaw-install.lock"
-  sleep 60 & local holder=$!
+  command -p sleep 60 & local holder=$!  # the real sleep: the shimmed one exits at once
   echo "$holder" > "$OCI_ROOT/run/openclaw-install.lock/pid"
   run bash "$APP/install.sh"
   kill "$holder"
