@@ -7,7 +7,6 @@
 OCI_ROOT="${OCI_ROOT:-}"
 STATE_DIR="$OCI_ROOT/var/lib/openclaw-install"
 STATE_FILE="$STATE_DIR/state"
-SEQ_FILE="$STATE_DIR/sequence"
 
 SUPPORTED_OS_IDS="debian ubuntu rocky almalinux centos fedora"
 
@@ -32,13 +31,11 @@ upper case (for example --kali-image or KALI_IMAGE); the option wins.
 
   --openclaw-version V   OpenClaw version, dist-tag or spec (required)
   --kali-image REF       Kali image, registry/repo:tag or @digest (required)
-  --callback-url URL     HTTPS events endpoint (required)
-  --job-id ID            Deployment ID echoed in every event (required)
   --kali-packages "P"    Packages to add to the Kali image (default: kali-linux-headless; "" = none)
   --dry-run              Validate and detect only; change nothing
 
-Secrets are read from the environment only and are refused as options:
-  CALLBACK_TOKEN         Bearer token for the events endpoint (required)
+Output: ::progress <percent> <phase> after each phase, one ::error <message>
+on failure. Exit code 0 means installed and verified.
 
 Model provider credentials are not parameters: add them in the Control UI
 (Models -> Connect provider) after the install.
@@ -53,14 +50,9 @@ parse_args() {
       val="${opt#*=}"; opt="${opt%%=*}"; has_val=true
     fi
     case "$opt" in
-      --callback-token)
-        local name
-        name="$(printf '%s' "${opt#--}" | tr 'a-z-' 'A-Z_')"
-        die "$name is a secret: set it in the environment, not as an option"
-        ;;
       --help | -h) usage; exit 0 ;;
       --dry-run) DRY_RUN=true; shift; continue ;;
-      --openclaw-version | --kali-image | --callback-url | --job-id | --kali-packages)
+      --openclaw-version | --kali-image | --kali-packages)
         if ! $has_val; then
         (($# >= 2)) || die "$opt needs a value"
           val="$2"; shift
@@ -74,13 +66,12 @@ parse_args() {
 }
 
 # validate_params: applies defaults, then reports every problem at once.
-# Messages name the parameter but never echo a secret's value.
 validate_params() {
   KALI_PACKAGES="${KALI_PACKAGES-kali-linux-headless}"
   DRY_RUN="${DRY_RUN:-false}"
 
   local errors=() p
-  for p in OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID; do
+  for p in OPENCLAW_VERSION KALI_IMAGE; do
     [[ -n "${!p:-}" ]] || errors+=("$p is required")
   done
 
@@ -90,10 +81,6 @@ validate_params() {
   check OPENCLAW_VERSION '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$' 'must be a version, dist-tag or spec'
   check KALI_IMAGE '^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}|@sha256:[a-f0-9]{64})$' \
     'must be a full image reference with a tag or digest'
-  check CALLBACK_URL '^https://[^[:space:]]+$' 'must be an https:// URL'
-  check CALLBACK_TOKEN '^[A-Za-z0-9._~+/=-]{16,}$' 'must be 16-512 URL-safe characters'
-  local token="${CALLBACK_TOKEN:-}"; ((${#token} <= 512)) || errors+=("CALLBACK_TOKEN must be 16-512 URL-safe characters")
-  check JOB_ID '^[A-Za-z0-9._:-]{1,128}$' 'must be 1-128 letters, digits or ._:-'
   check KALI_PACKAGES '^[a-z0-9.+ -]*$' 'must be space-separated Debian package names'
   check DRY_RUN '^(true|false)$' 'must be true or false'
   unset -f check
@@ -105,15 +92,6 @@ validate_params() {
     exit 1
   fi
 }
-
-# callback_params_valid: true when the events endpoint can be reached, so even
-# a failure in the remaining validation can be reported.
-callback_params_valid() {
-  [[ "${CALLBACK_URL:-}" =~ ^https://[^[:space:]]+$ ]] &&
-    [[ "${CALLBACK_TOKEN:-}" =~ ^[A-Za-z0-9._~+/=-]{16,}$ ]] && ((${#CALLBACK_TOKEN} <= 512)) &&
-    [[ "${JOB_ID:-}" =~ ^[A-Za-z0-9._:-]{1,128}$ ]]
-}
-
 
 # detect_os: sets OS_ID, OS_CODENAME and OS_FAMILY (apt | dnf) from os-release.
 # Only the exact supported IDs are accepted, because the Docker repository
@@ -140,7 +118,7 @@ sha256() {
 }
 
 # phase_inputs PHASE: the parameters that change what PHASE installs. A phase
-# is redone when one of them changes; IDs, URLs and secrets never redo work.
+# is redone when one of them changes.
 phase_inputs() {
   case "$1" in
     openclaw) echo OPENCLAW_VERSION ;;
@@ -170,16 +148,6 @@ state_mark_done() {
   line="done=$1:$(phase_hash "$1")"
   others="$(grep -v "^done=$1:" "$STATE_FILE" 2>/dev/null || true)"
   printf '%s\n' ${others:+"$others"} "$line" > "$STATE_FILE"
-}
-
-next_sequence() {
-  local n=0
-  mkdir -p "$STATE_DIR"
-  chmod 700 "$STATE_DIR"
-  [[ -f "$SEQ_FILE" ]] && n="$(cat "$SEQ_FILE")"
-  n=$((n + 1))
-  printf '%s\n' "$n" > "$SEQ_FILE"
-  printf '%s\n' "$n"
 }
 
 # --- system helpers used by the phases ---------------------------------------

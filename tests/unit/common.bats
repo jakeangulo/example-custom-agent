@@ -27,18 +27,13 @@ setup() {
   [ "$DRY_RUN" = "true" ]
 }
 
-@test "secrets passed as flags are refused" {
-  run parse_args --callback-token abc
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"CALLBACK_TOKEN"*"environment"* ]]
-  run parse_args --callback-token=abc
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"CALLBACK_TOKEN"*"environment"* ]]
-}
-
-@test "the refusal message never echoes the secret value" {
-  run parse_args --callback-token sk-very-secret
-  [[ "$output" != *"sk-very-secret"* ]]
+@test "--callback-url and --job-id are unknown options" {
+  local opt
+  for opt in --callback-url --job-id --callback-token; do
+    run parse_args "$opt" x
+    [ "$status" -ne 0 ] || { echo "accepted: $opt"; return 1; }
+    [[ "$output" == *"unknown option"* ]]
+  done
 }
 
 @test "unknown flags are refused" {
@@ -48,11 +43,11 @@ setup() {
 }
 
 @test "every missing required parameter is reported at once" {
-  unset OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID
+  unset OPENCLAW_VERSION KALI_IMAGE
   parse_args
   run validate_params
   [ "$status" -ne 0 ]
-  for p in OPENCLAW_VERSION KALI_IMAGE CALLBACK_URL CALLBACK_TOKEN JOB_ID; do
+  for p in OPENCLAW_VERSION KALI_IMAGE; do
     [[ "$output" == *"$p"* ]]
   done
 }
@@ -62,10 +57,6 @@ setup() {
     "OPENCLAW_VERSION=1.0; rm -rf /"
     "KALI_IMAGE=kalilinux/kali-rolling"
     "KALI_IMAGE=Kali/Rolling:latest"
-    "CALLBACK_URL=http://api.example.test/x"
-    "CALLBACK_TOKEN=short"
-    "CALLBACK_TOKEN=has space in it 0123456789"
-    "JOB_ID=bad id"
     "KALI_PACKAGES=nmap; curl evil"
     "DRY_RUN=yes"
   )
@@ -78,13 +69,6 @@ setup() {
     [ "$status" -ne 0 ] || { echo "accepted: $c"; return 1; }
     [[ "$output" == *"${c%%=*}"* ]]
   done
-}
-
-@test "validation errors never echo secret values" {
-  export CALLBACK_TOKEN="bad token with spaces 0123456789"
-  parse_args
-  run validate_params
-  [[ "$output" != *"bad token with spaces"* ]]
 }
 
 @test "KALI_IMAGE accepts registry, port and digest forms" {
@@ -164,53 +148,16 @@ setup() {
   state_is_done docker
 }
 
-@test "a new job ID or callback URL keeps completed phases" {
-  parse_args; validate_params
-  state_init
-  state_mark_done kali
-  export JOB_ID="another-job" CALLBACK_URL="https://other.example.test/events"
-  parse_args; validate_params
-  state_init
-  state_is_done kali
-}
-
-@test "changing only a secret keeps completed phases" {
-  parse_args; validate_params
-  state_init
-  state_mark_done preflight
-  export CALLBACK_TOKEN="rotated-token-0123456789abcdef"
-  parse_args; validate_params
-  state_init
-  state_is_done preflight
-}
-
-@test "the state file holds no secret values" {
-  parse_args; validate_params
-  state_init
-  state_mark_done preflight
-  next_sequence >/dev/null
-  ! grep -r -e "$CALLBACK_TOKEN" "$OCI_ROOT/var/lib/openclaw-install" || false
-}
-
-@test "sequence numbers keep increasing across runs" {
-  parse_args; validate_params
-  state_init
-  [ "$(next_sequence)" = "1" ]
-  [ "$(next_sequence)" = "2" ]
-  state_init
-  [ "$(next_sequence)" = "3" ]
-}
-
 @test "the state directory is private" {
   parse_args; validate_params
   state_init
   [ "$(stat -c %a "$OCI_ROOT/var/lib/openclaw-install" 2>/dev/null || stat -f %Lp "$OCI_ROOT/var/lib/openclaw-install")" = "700" ]
 }
 
-@test "validation reports missing secrets cleanly under set -u" {
-  unset CALLBACK_TOKEN
+@test "validation reports missing parameters cleanly under set -u" {
+  unset KALI_IMAGE
   run bash -c 'set -euo pipefail; source "$1"; parse_args; validate_params' _ "$REPO_ROOT/lib/common.sh"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"CALLBACK_TOKEN is required"* ]]
+  [[ "$output" == *"KALI_IMAGE is required"* ]]
   [[ "$output" != *"unbound variable"* ]]
 }

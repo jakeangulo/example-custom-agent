@@ -19,10 +19,7 @@ common_setup() {
 set_valid_env() {
   export OPENCLAW_VERSION="2026.10.2"
   export KALI_IMAGE="kalilinux/kali-rolling:2025.4"
-  export CALLBACK_URL="https://api.example.test/deployments/d-1/events"
-  export CALLBACK_TOKEN="tok_0123456789abcdefABCDEF"
-  export JOB_ID="d-01JBX7Q8M4N2R5T6V7W8X9Y0Z1"
-  unset KALI_PACKAGES DRY_RUN
+  unset KALI_PACKAGES DRY_RUN CALLBACK_URL CALLBACK_TOKEN JOB_ID
 }
 
 # shim NAME [EXIT_CODE] [STDOUT]: a fake command that logs "NAME args" and
@@ -45,39 +42,13 @@ shim_script() {
   chmod +x "$SHIM_DIR/$name"
 }
 
-# curl_capture_shim: a fake curl for the events endpoint. It saves stdin (the
-# -K config) and the --data-binary body of each call as CALL_DIR/N.config and
-# N.body, then answers with the next code from HTTP_CODES (default 204).
-curl_capture_shim() {
-  export CALL_DIR="$BATS_TEST_TMPDIR/curl"; mkdir -p "$CALL_DIR"
-  export HTTP_CODES="${HTTP_CODES:-204}"
-  shim_script curl <<'EOF'
-n=$(( $(ls "$CALL_DIR" | wc -l) / 2 + 1 ))
-cat > "$CALL_DIR/$n.config"
-prev=""; for a in "$@"; do [[ "$prev" == --data-binary ]] && cp "${a#@}" "$CALL_DIR/$n.body"; prev="$a"; done
-codes=($HTTP_CODES); code="${codes[$((n-1))]:-${codes[-1]}}"
-[[ "$code" == fail ]] && exit 28
-printf '%s' "$code"
-EOF
-}
-
-# event N FILTER: jq FILTER applied to the Nth posted event body.
-event() { jq -r "$2" "$CALL_DIR/$1.body"; }
-
-# events: one line per posted event, "event percent phase", in posting order.
-events() {
-  local n=1
-  while [[ -f "$CALL_DIR/$n.body" ]]; do
-    jq -r '"\(.event) \(.percent) \(.phase)"' "$CALL_DIR/$n.body"
-    n=$((n + 1))
-  done
-}
+# markers: the ::progress and ::error lines of the last `run`, in order.
+markers() { grep -E '^::(progress|error) ' <<< "$output" || true; }
 
 # load_phases: sources the libraries and every phase with valid parameters.
 load_phases() {
   SCRIPT_DIR="$REPO_ROOT"  # set by install.sh in production
   source "$REPO_ROOT/lib/common.sh"
-  source "$REPO_ROOT/lib/report.sh"
   local f
   for f in "$REPO_ROOT"/lib/phases/*.sh; do source "$f"; done
   parse_args
