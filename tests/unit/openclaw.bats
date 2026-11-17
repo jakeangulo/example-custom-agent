@@ -16,8 +16,8 @@ EOF
   # Fake ip: the default route's source address is ROUTE_SRC (none if empty).
   export ROUTE_SRC="203.0.113.10"
   shim_script ip <<'EOF'
-[[ -n "$ROUTE_SRC" ]] && echo "1.1.1.1 via 203.0.113.1 dev eth0 src $ROUTE_SRC uid 0"
-exit 0
+[[ -n "$ROUTE_SRC" ]] || { echo "RTNETLINK answers: Network is unreachable" >&2; exit 2; }
+echo "1.1.1.1 via 203.0.113.1 dev eth0 src $ROUTE_SRC uid 0"
 EOF
   # Fake download: the upstream installer, when fetched, is a script that logs
   # its arguments and "installs" the openclaw shim.
@@ -88,9 +88,11 @@ EOF
 
 @test "no IPv4 on the default route and no PUBLIC_HOST fails the phase" {
   export ROUTE_SRC=""
-  run phase_openclaw
+  # Under the installer's own errexit, not bats' relaxed one.
+  run bash -Eeuo pipefail -c 'source "$1/lib/common.sh"; for f in "$1"/lib/phases/*.sh; do source "$f"; done
+    parse_args; validate_params; detect_os; phase_openclaw' _ "$REPO_ROOT"
   [ "$status" -ne 0 ]
-  [[ "$output" == *"PUBLIC_HOST"* ]]
+  [[ "$output" == *"set PUBLIC_HOST"* ]]
 }
 
 @test "the phase never asks a cloud metadata service" {

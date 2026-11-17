@@ -151,6 +151,15 @@ setup() {
   state_is_done docker
 }
 
+@test "changing PUBLIC_HOST redoes the openclaw phase" {
+  parse_args; validate_params
+  state_init
+  state_mark_done openclaw
+  export PUBLIC_HOST="agent.example.com"
+  parse_args; validate_params
+  ! state_is_done openclaw || false
+}
+
 @test "the state directory is private" {
   parse_args; validate_params
   state_init

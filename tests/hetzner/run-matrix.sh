@@ -128,6 +128,8 @@ check_success() { # check_success OUT IP DISTRO
     pass "$name gateway active" || fail "$name gateway not active"
   ssh_to "$ip" "openclaw config get agents.defaults.sandbox.mode" |
     grep -q non-main && pass "$name sandbox configured" || fail "$name sandbox config missing"
+  ssh_to "$ip" "openclaw config get gateway.controlUi.allowedOrigins" |
+    grep -qF "http://$ip:18789" && pass "$name Control UI origin is the public IPv4" || fail "$name Control UI origin is not http://$ip:18789"
   ssh_to "$ip" "runuser -u nobody -- timeout 5 bash -c '</dev/tcp/169.254.169.254/80'" 2>/dev/null &&
     fail "$name metadata reachable by non-root users" || pass "$name metadata blocked for non-root users"
 }
@@ -138,6 +140,7 @@ run_distro() { # run_distro DISTRO: create, fetch and install; output in $WORK/D
   log "creating $RUN-$distro on $image"
   ip="$(create_server "$RUN-$distro" "$image")"
   printf '%s %s\n' "$distro" "$ip" >> "$WORK/servers"
+  [[ -n "$ip" && "$ip" != null ]] || return 1
   wait_ssh "$ip" && fetch "$ip" && run_install "$ip" "$KALI_IMAGE" "$WORK/$distro.out"
 }
 
@@ -183,9 +186,16 @@ main() {
   : > "$WORK/servers"
   local d pids=()
   for d in "${distros[@]}"; do run_distro "$d" & pids+=($!); sleep 2; done
+  # A distro whose image or server could not be created never reaches the
+  # servers file; count it instead of letting the run pass without it.
+  local recorded
   negative_cases "${distros[0]}" &
   local negative=$!
   wait "${pids[@]}" || true
+  for d in "${distros[@]}"; do
+    recorded="$(cut -d' ' -f1 "$WORK/servers" | grep -cx "$d" || true)"
+    ((recorded > 0)) || fail "$d: no server was created (image or hcloud error)"
+  done
 
   local distro ip
   while read -r distro ip; do

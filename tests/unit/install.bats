@@ -24,6 +24,7 @@ phase_$p() {
   if [[ "\${HANG_PHASE:-}" == $p ]]; then touch "\$BATS_TEST_TMPDIR/hanging"; sleep_real 5; fi
   if [[ "\${FAIL_PHASE:-}" == $p ]]; then echo "something broke in $p"; return "\${FAIL_RC:-3}"; fi
   if [[ "\${DIE_PHASE:-}" == $p ]]; then die "custom reason in $p"; fi
+  if [[ "\${PARTIAL_PHASE:-}" == $p ]]; then printf 'downloading 42%%'; return 3; fi
   env > "\$BATS_TEST_TMPDIR/env-$p"
 }
 EOF
@@ -121,6 +122,20 @@ phases_run() { grep '^phase ' "$SHIM_LOG" | cut -d' ' -f2 | tr '\n' ' '; }
   DIE_PHASE=docker run bash "$APP/install.sh"
   [ "$status" -eq 1 ]
   [[ "$(markers | tail -1)" == "::error "*"custom reason in docker"* ]]
+}
+
+@test "::error starts its own line after unterminated phase output" {
+  PARTIAL_PHASE=docker run bash "$APP/install.sh"
+  [ "$status" -eq 3 ]
+  [[ "$(markers | tail -1)" == "::error phase 'docker' failed"* ]]
+}
+
+@test "a failure after the lock is taken prints one ::error" {
+  rm -rf "$OCI_ROOT/var/log"
+  : > "$OCI_ROOT/var/log"  # a file, so the log directory cannot be created
+  run bash "$APP/install.sh"
+  [ "$status" -ne 0 ]
+  [ "$(markers | grep -c '^::error ')" = 1 ]
 }
 
 @test "the old callback variables are ignored" {

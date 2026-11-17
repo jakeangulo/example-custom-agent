@@ -56,7 +56,7 @@ onboard_openclaw() {
 }
 
 # The Control UI only accepts browsers from listed origins; a LAN bind needs
-# the address users type. Runs every time, so a re-run fixes a changed IP.
+# the address users type. A re-run with a new PUBLIC_HOST redoes the phase.
 # shortcut: IPv4 only, plain HTTP; add the IPv6 origin or a TLS front when needed.
 # allow_control_ui_origin: the Control UI is reached at PUBLIC_HOST, or else at
 # the IPv4 address of the default route (the public address on a typical
@@ -64,7 +64,7 @@ onboard_openclaw() {
 allow_control_ui_origin() {
   local host="${PUBLIC_HOST:-}"
   if [[ -z "$host" ]]; then
-    host="$(ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')"
+    host="$(ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')" || host=""
     [[ "$host" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] ||
       die "could not find this machine's IPv4 address on the default route; set PUBLIC_HOST"
   fi

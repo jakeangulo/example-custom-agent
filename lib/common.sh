@@ -124,7 +124,7 @@ sha256() {
 # is redone when one of them changes.
 phase_inputs() {
   case "$1" in
-    openclaw) echo OPENCLAW_VERSION ;;
+    openclaw) echo OPENCLAW_VERSION PUBLIC_HOST ;;
     kali) echo KALI_IMAGE KALI_PACKAGES ;;
     *) ;;
   esac

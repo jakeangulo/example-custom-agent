@@ -74,7 +74,8 @@ on_exit() {
     elif [[ -n "$FAILED_CMD" ]]; then
       message+=" at line $FAILED_LINE: $FAILED_CMD"
     fi
-    printf '::error %s\n' "${message//$'\n'/ }"
+    # On its own line even if the last output line was left unterminated.
+    printf '\n::error %s\n' "${message//$'\n'/ }"
     log "ERROR: $message"
   fi
   release_lock
@@ -136,8 +137,8 @@ main() {
   # A run refused by the lock prints no ::error: the other run owns the install.
   ERROR_REPORTED=true
   acquire_lock
-  start_logging
   ERROR_REPORTED=false
+  start_logging
   state_init
   log "installer $SCRIPT_VERSION starting on $OS_ID ($OS_FAMILY)"
   run_phases
