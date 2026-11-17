@@ -40,7 +40,7 @@ X="$BATS_TEST_DIRNAME/../../example-marscape.yaml"
   from_help="$(bash "$REPO_ROOT/install.sh" --help | grep -oE '^  --[a-z-]+' | grep -vE -- '--(dry-run|help)$' |
     sed 's/^  --//' | tr 'a-z-' 'A-Z_' | sort | jq -R . | jq -sc .)"
   [ "$(yq "$M" '[.params[].name] | sort')" = "$from_help" ]
-  [ "$from_help" = '["KALI_IMAGE","KALI_PACKAGES","OPENCLAW_VERSION"]' ]
+  [ "$from_help" = '["KALI_IMAGE","KALI_PACKAGES","OPENCLAW_VERSION","PUBLIC_HOST"]' ]
   [ "$(yq "$M" '[.params[] | select(.required) | .name] | sort')" = '["KALI_IMAGE","OPENCLAW_VERSION"]' ]
   [ "$(yq "$M" '.params[] | select(.name == "KALI_PACKAGES") | .default')" = '"kali-linux-headless"' ]
 }

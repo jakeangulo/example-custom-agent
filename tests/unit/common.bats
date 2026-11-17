@@ -21,7 +21,8 @@ setup() {
 }
 
 @test "a flag overrides the environment for non-secret parameters" {
-  parse_args --openclaw-version 2026.11.0 --kali-packages nmap --dry-run
+  parse_args --openclaw-version 2026.11.0 --kali-packages nmap --public-host 198.51.100.7 --dry-run
+  [ "$PUBLIC_HOST" = "198.51.100.7" ]
   [ "$OPENCLAW_VERSION" = "2026.11.0" ]
   [ "$KALI_PACKAGES" = "nmap" ]
   [ "$DRY_RUN" = "true" ]
@@ -58,6 +59,8 @@ setup() {
     "KALI_IMAGE=kalilinux/kali-rolling"
     "KALI_IMAGE=Kali/Rolling:latest"
     "KALI_PACKAGES=nmap; curl evil"
+    "PUBLIC_HOST=http://x.example"
+    "PUBLIC_HOST=a b"
     "DRY_RUN=yes"
   )
   local c

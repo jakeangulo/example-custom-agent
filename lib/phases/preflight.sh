@@ -3,7 +3,7 @@
 
 phase_preflight() {
   # Each needed command and the package that provides it, per family.
-  local tools=(curl:curl:curl git:git:git jq:jq:jq iptables:iptables:iptables-nft gpg:gnupg:)
+  local tools=(curl:curl:curl git:git:git jq:jq:jq iptables:iptables:iptables-nft gpg:gnupg: ip:iproute2:iproute)
   local packages=(ca-certificates) entry cmd apt_pkg dnf_pkg missing=false
   for entry in "${tools[@]}"; do
     IFS=: read -r cmd apt_pkg dnf_pkg <<< "$entry"

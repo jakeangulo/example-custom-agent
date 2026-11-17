@@ -32,6 +32,8 @@ upper case (for example --kali-image or KALI_IMAGE); the option wins.
   --openclaw-version V   OpenClaw version, dist-tag or spec (required)
   --kali-image REF       Kali image, registry/repo:tag or @digest (required)
   --kali-packages "P"    Packages to add to the Kali image (default: kali-linux-headless; "" = none)
+  --public-host HOST     Host name or IPv4 the Control UI is reached at (default: the
+                         IPv4 of the default route)
   --dry-run              Validate and detect only; change nothing
 
 Output: ::progress <percent> <phase> after each phase, one ::error <message>
@@ -52,7 +54,7 @@ parse_args() {
     case "$opt" in
       --help | -h) usage; exit 0 ;;
       --dry-run) DRY_RUN=true; shift; continue ;;
-      --openclaw-version | --kali-image | --kali-packages)
+      --openclaw-version | --kali-image | --kali-packages | --public-host)
         if ! $has_val; then
         (($# >= 2)) || die "$opt needs a value"
           val="$2"; shift
@@ -82,6 +84,7 @@ validate_params() {
   check KALI_IMAGE '^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}|@sha256:[a-f0-9]{64})$' \
     'must be a full image reference with a tag or digest'
   check KALI_PACKAGES '^[a-z0-9.+ -]*$' 'must be space-separated Debian package names'
+  check PUBLIC_HOST '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$' 'must be a host name or IPv4 address'
   check DRY_RUN '^(true|false)$' 'must be true or false'
   unset -f check
 

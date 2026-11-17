@@ -19,7 +19,7 @@ common_setup() {
 set_valid_env() {
   export OPENCLAW_VERSION="2026.10.2"
   export KALI_IMAGE="kalilinux/kali-rolling:2025.4"
-  unset KALI_PACKAGES DRY_RUN CALLBACK_URL CALLBACK_TOKEN JOB_ID
+  unset KALI_PACKAGES DRY_RUN PUBLIC_HOST CALLBACK_URL CALLBACK_TOKEN JOB_ID
 }
 
 # shim NAME [EXIT_CODE] [STDOUT]: a fake command that logs "NAME args" and

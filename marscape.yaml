@@ -23,6 +23,10 @@ params:
     required: false
     default: kali-linux-headless
     pattern: '^[a-z0-9.+ -]*$'
+  - name: PUBLIC_HOST
+    description: Host name or IPv4 the Control UI is reached at (default - the IPv4 of the default route)
+    required: false
+    pattern: '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
 
 os:
   - debian-12

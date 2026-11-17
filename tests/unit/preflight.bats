@@ -38,3 +38,13 @@ setup() {
   phase_preflight
   ! grep -q '^dnf' "$SHIM_LOG" || false
 }
+
+@test "a missing ip command installs iproute on either family" {
+  MISSING="ip"
+  phase_preflight
+  grep -qE '^apt-get .*install .*ca-certificates iproute2$' "$SHIM_LOG"
+  use_os rocky-9
+  : > "$SHIM_LOG"
+  phase_preflight
+  grep -qE '^dnf -y install ca-certificates iproute$' "$SHIM_LOG"
+}
