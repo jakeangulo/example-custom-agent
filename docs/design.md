@@ -1,33 +1,33 @@
 # OpenClaw + Kali Installer: Design
 
-Oct 28, 2026 · revised Nov 2, 2026 (converted from the original `.docx`; see [Changes from the original](#changes-from-the-original))
+Oct 28, 2026 · revised Nov 2 and Nov 17, 2026 (converted from the original `.docx`; see [Changes from the original](#changes-from-the-original))
 
 ## Overview
 
-`install.sh` is a non-interactive Bash installer for a pinned OpenClaw version plus Kali Linux tooling. cloud-init runs it on first boot of a freshly provisioned Hetzner Cloud server.
+`install.sh` is a non-interactive Bash installer for a pinned OpenClaw version plus Kali Linux tooling. It runs as root on a Linux server, started by a person at a prompt or by any provisioning tool over SSH (Marscape's provisioner uses PyInfra). It does not depend on any cloud provider, on cloud-init or on a callback endpoint: it prints its progress and errors on stdout, and its exit code is the result.
 
-It is the install step of the Hetzner provisioning service ([marscape-hetzner-provisioner](https://gitlab.com/appyfic/marscape-hetzner-provisioner)): the provisioner creates the server and passes parameters through cloud-init user data, and this script performs the install and reports its own progress to the provisioner's events route, so nothing ever needs to SSH in to know what happened.
+The repository describes itself to provisioners with [`marscape.yaml`](../marscape.yaml): script path, parameters, supported OS, machine size, ports, expected duration and retry and reboot settings. [`example-marscape.yaml`](../example-marscape.yaml) documents every field for authors of other install repositories.
 
 ## Goals and non-goals
 
 **Goals**
 
-- Install a pinned OpenClaw version non-interactively on every Linux distro Hetzner Cloud offers as a standard image.
+- Install a pinned OpenClaw version non-interactively on the common server distros, on any provider or none.
 - Make Kali Linux tooling available to the OpenClaw agent through Docker, wired into OpenClaw's own sandbox configuration.
 - Accept every variable input as a parameter: no hardcoded secrets or server-specific values.
 - Fail loudly and safely, and support safe retries.
-- Report progress in 20% steps plus a final success or failure, over HTTP.
+- Report progress in 20% steps on stdout, with the exit code as the result, so a person and a provisioning tool read the same thing.
 
 **Non-goals**
 
 - Day-2 configuration management or drift correction.
 - Provisioning the server itself.
-- The events endpoint's own storage and authentication; the script only calls it.
+- Reporting status to anything: the caller reads stdout and the exit code.
 - Any interactive or GUI mode.
 
 ## Supported platforms
 
-Exactly the Hetzner Cloud standard images, in two package-manager families. openSUSE is excluded: it is a Hetzner Robot (dedicated server) image, not a Cloud one.
+Six distros, in two package-manager families (the standard images of the common clouds). openSUSE is not supported.
 
 | Distro | `ID` | Family | Docker repository |
 | --- | --- | --- | --- |
@@ -42,57 +42,48 @@ The script reads `ID` from `/etc/os-release` and accepts only these six values. 
 
 ## Parameters
 
-Every input is a parameter: an environment variable, or an option that takes precedence over it. Secrets are read from the environment only and refused as options, to keep them out of `ps` and shell history.
+Every input is a parameter: an environment variable, or an option that takes precedence over it. The installer has no secret parameters; the contract in `example-marscape.yaml` says how others' secrets travel (environment only, never printed).
 
 | Parameter | Required | Description |
 | --- | --- | --- |
 | `OPENCLAW_VERSION` | Yes | Version, dist-tag or spec, passed to OpenClaw's official installer |
 | `KALI_IMAGE` | Yes | Full image reference with a tag or digest, e.g. `kalilinux/kali-rolling@sha256:1ff4a2be3849333687b3ed2b31bb5af0cd1b7c0a11ec7713feb5abe5a6b2795c`; Kali publishes only rolling tags (`latest`, per-arch), so pin a digest for repeatable installs |
 | `KALI_PACKAGES` | No (default `kali-linux-headless`) | Packages built into a local image on top of `KALI_IMAGE`; empty means use `KALI_IMAGE` as-is |
-| `CALLBACK_URL` | Yes | HTTPS events route; set by the provisioner |
-| `CALLBACK_TOKEN` | Yes, secret | Per-deployment bearer token for the events route; set by the provisioner |
-| `JOB_ID` | Yes | Deployment ID echoed in every event; set by the provisioner |
+| `PUBLIC_HOST` | No (default: the IPv4 of the default route) | Host name or IPv4 the Control UI is reached at; set it behind NAT or for a DNS name |
 | `DRY_RUN` | No (default `false`) | Validate parameters and detect the distro only; change nothing |
 
 `KALI_IMAGE` is a full reference rather than a bare tag, so a caller can point at a private registry or another Kali variant without a script change.
 
-Through the provisioner, the client sends the non-secret parameters in `install.params` and the secrets in `install.secrets`; the provisioner adds `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID`.
+Through a provisioner, the client sends the parameters in its request; the provisioner checks them against `marscape.yaml` and passes them as the environment of the install command. The old `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` variables are ignored if still set.
 
-## Status reporting
+## Output contract
 
-Each event is a `POST` to `CALLBACK_URL` with `Authorization: Bearer <CALLBACK_TOKEN>` and a JSON body, following the provisioner's events contract. The token is handed to `curl` as config on standard input, never as an argument. Posting is best effort: each attempt has a 5-second timeout, and a failed attempt is retried 3 times after 1, 2 and 4 seconds. A dead endpoint never stops the install.
-
-| Field | Description |
+| Output | Meaning |
 | --- | --- |
-| `event` | `started`, `in_progress`, `succeeded` or `failed` |
-| `job_id` | From `JOB_ID` |
-| `hostname` | The server's hostname |
-| `percent` | 0, 20, 40, 60, 80 or 100 |
-| `phase` | The current phase |
-| `message` | Human-readable detail |
-| `timestamp` | ISO 8601, UTC |
-| `script_version` | The installer's commit |
-| `sequence` | Monotonic across runs, so the receiver can order and de-duplicate |
-| `exit_code`, `log_tail` | On `failed` only: the exit code and the end of the log (at most 50 lines and 12,000 bytes), with secret values replaced by `[REDACTED]` and control and non-ASCII characters removed |
+| `::progress <percent> <phase>` | Printed after each phase (20, 40, 60, 80, 100), also for phases skipped on a rerun |
+| `::error <message>` | Printed once when the run fails, with the phase, exit code and reason. Not printed for a dry run or for a run refused by the lock (the other run owns the install) |
+| Exit code `0` | Installed and verified |
+| Any other exit code | Failed; the log and the `::error` line say why. `194`, the manifest's `reboot_exit_code`, would ask the caller to reboot and rerun, but this installer never needs it |
+
+Markers start at the beginning of a line on stdout. Everything else is the log.
 
 ## Phases
 
 | % | Phase | Milestone |
 | --- | --- | --- |
-| 0 | `started` | Parameters validated, distro detected, lock taken |
-| 20 | `preflight` | Missing tools installed (`curl`, `git`, `jq`, `iptables`, `gpg` on apt) |
+| 20 | `preflight` | Missing tools installed (`curl`, `git`, `jq`, `iptables`, `ip`, `gpg` on apt) |
 | 40 | `docker` | Docker Engine from Docker's repository, running; metadata service blocked for containers and non-root users |
 | 60 | `openclaw` | OpenClaw installed by its official installer at the pinned version and onboarded as root (OpenClaw's default), with no model provider; gateway running as a system service with the Control UI on the public IPv4 |
 | 80 | `kali` | Kali image pulled, local image built with `KALI_PACKAGES`, sandbox config written and validated, gateway restarted |
-| 100 | `verify` | Version matches, gateway healthy on `/healthz`, sandbox image starts, metadata unreachable from containers and non-root users; `succeeded` posted |
+| 100 | `verify` | Version matches, gateway healthy on `/healthz`, sandbox image starts, metadata unreachable from containers and non-root users |
 
-After each phase the script records it in the state file and posts its percentage. If anything fails, the `EXIT` trap posts one `failed` event with the phase, exit code and log tail, then exits with the original code.
+Before the phases, the script validates the parameters, detects the distro and takes the lock. After each phase it records it in the state file and prints its `::progress` line. If anything fails, the `EXIT` trap prints one `::error` line, then exits with the original code.
 
 ## OpenClaw setup
 
 - **Install.** `https://openclaw.ai/install.sh` is downloaded over HTTPS (TLS 1.2+) to a file, not piped, and run as root with `--version "$OPENCLAW_VERSION" --no-prompt --no-onboard`. It installs Node.js from NodeSource and OpenClaw globally, so the binary is root-owned and the agent cannot modify it. An exact version already installed is not reinstalled; a dist-tag always re-runs the installer.
 - **Onboarding.** As root, the way OpenClaw is installed by default: `openclaw onboard --non-interactive --accept-risk --mode local --auth-choice skip --gateway-bind lan --gateway-port 18789 --skip-daemon --skip-skills --skip-health`. With no auth flags OpenClaw generates the gateway token and stores it in its own config (`/root/.openclaw/openclaw.json`, `gateway.auth.token`, token mode), so OpenClaw's standard commands work on the server as documented: `openclaw gateway auth-token --show`, `openclaw devices approve`, `openclaw dashboard`. No model provider is configured: users add one in the Control UI (**Models → Connect provider**). Onboarding is skipped once root has an OpenClaw config.
-- **Control UI origin.** Every run reads the server's public IPv4 from the Hetzner metadata service and sets `gateway.controlUi.allowedOrigins` to `["http://<ipv4>:18789"]`, which OpenClaw requires for a non-loopback Control UI. IPv6 and TLS are not configured.
+- **Control UI origin.** The openclaw phase sets `gateway.controlUi.allowedOrigins` to `["http://<host>:18789"]`, which OpenClaw requires for a non-loopback Control UI. The host is `PUBLIC_HOST`, or else the IPv4 address of the default route (`ip -4 route get`), which is the public address on a typical cloud server; no cloud metadata service is asked. `PUBLIC_HOST` is an input of the openclaw phase, so a re-run with a new value redoes it. IPv6 and TLS are not configured.
 - **Gateway service.** The script writes its own system unit, `openclaw-gateway.service`: `User=root`, `HOME=/root`, `ExecStart=openclaw gateway run --port 18789 --bind lan` (all interfaces; OpenClaw refuses a non-loopback bind without gateway auth), restart on failure except exit code 78 (invalid config). OpenClaw's own daemon install creates a per-user unit, which needs D-Bus and lingering and fails silently on headless servers.
 
 ## Kali sandbox configuration
@@ -116,37 +107,37 @@ The local image is tagged `openclaw-kali:<hash>`, where the hash covers the base
 
 ## Error handling and resilience
 
-- `set -Eeuo pipefail` throughout. The `ERR` trap records the failing command and line; the `EXIT` trap posts exactly one `failed` event when the exit code is not 0, and nothing on success. Its message carries the reason given to `die`. `INT` and `TERM` become exits 130 and 143 and go through the same path; `tee` ignores those signals, so a signal sent to the whole process group (as `timeout` and systemd do) still produces the event.
-- As soon as `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` are valid, any later failure is reported, including other invalid parameters, an unsupported distro or a missing root, so the client sees the reason instead of a timeout. A dry run never posts.
-- Events are built in bash rather than with `jq`, so the first event works before preflight installs anything.
-- **Lock:** `/run/openclaw-install.lock`, a directory created atomically, holding the owner's pid. A second run is refused and posts nothing (a `failed` event would end the deployment the first run is still installing). A lock whose pid is gone is taken over.
-- **State:** `/var/lib/openclaw-install/` (`0700`) records each completed phase with a hash of that phase's own inputs: `OPENCLAW_VERSION` for openclaw, and `KALI_IMAGE` and `KALI_PACKAGES` for kali. A re-run skips completed phases whose inputs are unchanged, so a corrected `KALI_IMAGE` redoes only kali; a new `JOB_ID`, `CALLBACK_URL` or secret redoes nothing. Skipped phases still report their percentage. Verify always runs.
+- `set -Eeuo pipefail` throughout. The `ERR` trap records the failing command and line; the `EXIT` trap prints exactly one `::error` line when the exit code is not 0, and nothing on success. Its message carries the reason given to `die`. `INT` and `TERM` become exits 130 and 143 and go through the same path; `tee` ignores those signals, so a signal sent to the whole process group (as `timeout` and SSH-driven tools do) still produces the line.
+- Invalid parameters, an unsupported distro or a missing root are reported the same way, so the caller sees the reason. A dry run never prints `::error`.
+- **Lock:** `/run/openclaw-install.lock`, a directory created atomically, holding the owner's pid. A second run is refused without `::error` (the first run owns the install, and a caller must not end it). A lock whose pid is gone is taken over.
+- **State:** `/var/lib/openclaw-install/` (`0700`) records each completed phase with a hash of that phase's own inputs: `OPENCLAW_VERSION` for openclaw, and `KALI_IMAGE` and `KALI_PACKAGES` for kali. A re-run skips completed phases whose inputs are unchanged, so a corrected `KALI_IMAGE` redoes only kali. Skipped phases still print their `::progress` line. Verify always runs.
 - **Idempotence:** every phase is safe to repeat: packages are installed only if missing, Docker only if absent or stopped, OpenClaw only if not at the pin, the Kali image only if its tag is missing, and the metadata rules only if absent.
 
 ## Security
 
 - OpenClaw runs as root (its default), under a system-level systemd unit. The servers are for professionals who administer them as root; OpenClaw's own documentation and commands apply unchanged.
 - `OPENCLAW_VERSION` pins the install; the official installer is fetched over HTTPS only.
-- **Secrets.** `CALLBACK_TOKEN` comes from the environment only, is unexported right after validation so no child process inherits it, is never passed as an argument or logged, is excluded from the state file, and is redacted from the log tail sent on failure. The gateway token is OpenClaw's own, in root's OpenClaw config. The Control UI is exposed on the public IP over plain HTTP with token auth plus OpenClaw's per-browser device pairing; the server firewall should allow port `18789` only from the user's IP.
-- **No shared platform key on the server.** The events route accepts only the per-deployment `CALLBACK_TOKEN`, which expires at the deployment's deadline.
-- **Metadata service.** user_data, which carries the secrets, stays readable from `169.254.169.254` for the server's life. `openclaw-metadata-block.service` drops that traffic from Docker containers (`DOCKER-USER` chain) and from every non-root user (`OUTPUT` with `--uid-owner`), at every boot and Docker restart. Verify fails if either can still reach it. Root, and so OpenClaw itself, can still read it: user_data carries the `CALLBACK_TOKEN`, which expires at the deployment's deadline, and any `install.secrets`.
+- **Secrets.** The installer takes none. The gateway token is OpenClaw's own, in root's OpenClaw config. The Control UI is exposed on the public IP over plain HTTP with token auth plus OpenClaw's per-browser device pairing; the server firewall should allow port `18789` only from the user's IP.
+- **Metadata service.** On many clouds `169.254.169.254` serves the server's user data and credentials for its whole life. `openclaw-metadata-block.service` drops that traffic from Docker containers (`DOCKER-USER` chain) and from every non-root user (`OUTPUT` with `--uid-owner`), at every boot and Docker restart. Verify fails if either can still reach it. Root, and so OpenClaw itself, can still read it. The block is kept as hardening: no secrets reach this installer through user data any more.
 - **Sandbox.** OpenClaw starts its Kali sandbox containers through Docker; the containers get no Docker socket and no host directories.
-- **Abuse reports.** Kali ships offensive-security tools, and scans from a Hetzner IP can trigger abuse reports. Operators should only scan targets they are authorised to test.
+- **Abuse reports.** Kali ships offensive-security tools, and scans from a cloud server's IP can trigger abuse reports. Operators should only scan targets they are authorised to test.
 
 ## Logging
 
-All output goes to standard output (captured in cloud-init's log) and to `/var/log/openclaw-install.log` (`0600`), so a failure can be diagnosed on the server even if no event reached the endpoint. The events are the main channel for the provisioner; the log file is the fallback.
+All output goes to standard output and to `/var/log/openclaw-install.log` (`0600`), so a failure can be diagnosed on the server as well as from the caller's captured output.
 
-## cloud-init delivery
+## Running under a provisioner
 
-Hetzner's user_data limit is 32 KiB, so user_data stays a small stub: it receives the parameters as environment variables, clones the install repository at a pinned commit, and runs `install.sh` from the checkout. The repository URL is a parameter: a public GitLab repository for now, the Forgejo server later. [`cloud-init/user-data.example.yaml`](../cloud-init/user-data.example.yaml) is a standalone example; the provisioner renders its own equivalent.
+A provisioner clones the repository at a pinned commit, reads `marscape.yaml`, and runs `install.script` as root over SSH with the parameters as the command's environment. It relays `::progress` lines as the deployment's progress, uses the `::error` line and the end of the output as the failure reason, and decides retries and reboots from the exit code and `marscape.yaml` (`max_retries`, `reboot_exit_code`). The script must stay safe to rerun, because retries run it again on the same server.
 
 ## Testing
 
-- **Unit tests** (`tests/unit`, bats) run every phase against command shims and a fake filesystem root (`OCI_ROOT`), covering parameters, distro detection, events, the traps, resume and locking, and that secrets reach no log, file or argument list.
-- **Real servers** (`tests/hetzner/run-matrix.sh`): one Hetzner server per supported distro, plus a receiver that records events. It checks the events arrive in order, the gateway runs, the metadata service is blocked and secrets stay in the env file; it also runs the failure, resume and lock cases. Every server is deleted at the end.
+- **Unit tests** (`tests/unit`, bats) run every phase against command shims and a fake filesystem root (`OCI_ROOT`), covering parameters, distro detection, the output markers, the traps, resume and locking. `manifest.bats` keeps `marscape.yaml` in step with `install.sh --help`, the supported distros and `example-marscape.yaml`, and checks the manifests name no provider.
+- **Real servers** (`tests/hetzner/run-matrix.sh`): one Hetzner server per supported distro. It clones the repository over SSH, runs `install.sh` the way a provisioning tool would, and checks the exit code and markers, that the gateway runs and that the metadata service is blocked; it also runs the failure, resume and lock cases. Every server is deleted at the end.
 
 ## Changes from the original
+
+- **2026-11-17 (provider-agnostic installer).** The installer no longer depends on cloud-init, a callback endpoint or Hetzner. Removed: `lib/report.sh`, the `CALLBACK_URL`, `CALLBACK_TOKEN` and `JOB_ID` parameters (ignored if still set), the event sequence, and the cloud-init example. Progress and errors are `::progress` and `::error` lines on stdout, and the exit code is the result. The Control UI origin comes from the new `PUBLIC_HOST` parameter or the default route's IPv4 instead of Hetzner's metadata service. Added `marscape.yaml` and `example-marscape.yaml`. The Hetzner matrix runs the installer over SSH. Callers pinned to commit `a8b0f70` or earlier keep the old behaviour, because they pin the commit.
 
 - `API_KEY` sent as `x-api-key` is replaced by the per-deployment `CALLBACK_TOKEN` sent as a bearer token; the shared platform key never reaches a server.
 - Event names follow the provisioner's events route: `event` with `succeeded` and `failed`, instead of `status` with `success` and `failure`.

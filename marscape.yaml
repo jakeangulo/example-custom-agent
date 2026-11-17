@@ -1,0 +1,47 @@
+# Marscape install manifest for this repository. Field reference: example-marscape.yaml.
+schema_version: 1
+name: openclaw-kali
+description: OpenClaw agent gateway with a Kali Linux Docker container as its sandbox.
+
+install:
+  script: install.sh
+  expected_duration_minutes: 20
+  reboot_exit_code: 194
+  max_retries: 3
+
+params:
+  - name: OPENCLAW_VERSION
+    description: OpenClaw version, dist-tag or spec
+    required: true
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$'
+  - name: KALI_IMAGE
+    description: Kali image, registry/repo:tag or @digest
+    required: true
+    pattern: '^[a-z0-9]([a-z0-9._/-]*[a-z0-9])?(:[0-9]+)?(/[a-z0-9._-]+)*(:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}|@sha256:[a-f0-9]{64})$'
+  - name: KALI_PACKAGES
+    description: Packages to add to the Kali image ("" = none)
+    required: false
+    default: kali-linux-headless
+    pattern: '^[a-z0-9.+ -]*$'
+  - name: PUBLIC_HOST
+    description: Host name or IPv4 the Control UI is reached at (default - the IPv4 of the default route)
+    required: false
+    pattern: '^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$'
+
+os:
+  - debian-12
+  - ubuntu-24.04
+  - ubuntu-26.04
+  - rocky-9
+  - almalinux-9
+  - centos-stream-9
+  - fedora-42
+
+machine:
+  minimum: { vcpus: 2, memory_gb: 4, disk_gb: 40 }
+  default: { vcpus: 3, memory_gb: 4, disk_gb: 80 }
+
+ports:
+  - port: 18789
+    protocol: tcp
+    description: OpenClaw Control UI

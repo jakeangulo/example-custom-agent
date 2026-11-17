@@ -1,5 +1,9 @@
 # Plan: OpenClaw + Kali installer (`appyfic/example-custom-agent`)
 
+> **Superseded (2026-11-17):** the callbacks and cloud-init delivery described here were removed; see
+> [superpowers/plans/2026-11-17-provider-agnostic-installer.md](superpowers/plans/2026-11-17-provider-agnostic-installer.md)
+> and [design.md](design.md).
+
 > **Superseded in part (2026-11-15):** `LLM_AUTH_CHOICE` and `LLM_API_KEY` were removed. The gateway now binds to
 > the LAN with token auth and serves the Control UI on the public IP, and users connect model providers there. This plan
 > is kept as the build record; [design.md](design.md) describes the current behaviour.

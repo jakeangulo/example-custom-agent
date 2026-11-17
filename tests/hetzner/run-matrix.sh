@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Runs the installer on real Hetzner Cloud servers, one per supported distro,
-# and checks the result from the outside. Costs a few euro cents per run: every
-# server is deleted at the end, even on failure or Ctrl-C.
+# and checks the result from the outside. The installer is run over SSH exactly
+# as a person or a provisioning tool would: clone, then sudo ./install.sh with
+# parameters in the environment. Costs a few euro cents per run: every server is
+# deleted at the end, even on failure or Ctrl-C.
 #
-# Requirements: hcloud CLI, jq, ssh, ssh-keygen, openssl, curl.
+# Requirements: hcloud CLI, jq, ssh, ssh-keygen.
 # The repository must be publicly cloneable at GIT_REF (pushed).
 #
 # Environment:
@@ -41,7 +43,6 @@ INSTALL_TIMEOUT="${INSTALL_TIMEOUT:-2400}"
 
 RUN="oci-test-$(date +%Y%m%d%H%M%S)"
 WORK="$(mktemp -d)"
-TOKEN="$(openssl rand -hex 24)"
 FAILURES=0
 
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
@@ -81,136 +82,98 @@ image_for() {
   esac
 }
 
-create_server() { # create_server NAME IMAGE USER_DATA_FILE -> prints IPv4
+create_server() { # create_server NAME IMAGE -> prints IPv4
   hcloud server create --name "$1" --type "$SERVER_TYPE" --image "$2" --location "$LOCATION" \
-    --ssh-key "$RUN" --label "run=$RUN" --user-data-from-file "$3" -o json |
+    --ssh-key "$RUN" --label "run=$RUN" -o json |
     jq -r '.server.public_net.ipv4.ip'
 }
 
-start_receiver() {
-  local recv="$WORK/receiver.yaml" script
-  script="$(sed 's/^/      /' "$HERE/receiver.py")"
-  cat > "$recv" <<EOF
-#cloud-config
-packages: [caddy, python3]
-write_files:
-  - path: /opt/receiver.py
-    permissions: "0755"
-    content: |
-$script
-runcmd:
-  - [bash, -c, 'nohup python3 /opt/receiver.py 8080 $TOKEN >/var/log/receiver.log 2>&1 &']
-  - [bash, -c, 'ip=\$(curl -s http://169.254.169.254/hetzner/v1/metadata/public-ipv4); printf "%s.sslip.io {\n  reverse_proxy 127.0.0.1:8080\n}\n" "\$ip" > /etc/caddy/Caddyfile; systemctl restart caddy']
-EOF
-  log "creating the receiver"
-  RECEIVER_IP="$(create_server "$RUN-recv" "$(latest_image ubuntu)" "$recv")"
-  RECEIVER="https://$RECEIVER_IP.sslip.io"
+wait_ssh() { # wait_ssh IP: until SSH answers and the image's own first boot is done
   for _ in $(seq 1 60); do
-    curl -fsS --max-time 5 "$RECEIVER/health" >/dev/null 2>&1 && { log "receiver ready at $RECEIVER"; return 0; }
-    sleep 10
-  done
-  log "receiver never became ready"; exit 1
-}
-
-events() { # events JOB -> JSON list
-  curl -fsS --max-time 10 -H "Authorization: Bearer $TOKEN" "$RECEIVER/events/$1"
-}
-
-user_data() { # user_data JOB KALI_IMAGE -> file
-  # The env block is regenerated with printf %q, so any character in a value
-  # (including the API key) survives being sourced; awk's ENVIRON avoids the
-  # escaping rules of sed and awk -v.
-  local f="$WORK/$1.yaml" block
-  block="$(
-    printf '      %s=%q\n' INSTALL_REPO_URL "$GIT_URL" INSTALL_REPO_REF "$GIT_REF" INSTALL_SCRIPT install.sh \
-      OPENCLAW_VERSION "$OPENCLAW_VERSION" KALI_IMAGE "$2" KALI_PACKAGES "$KALI_PACKAGES" \
-      CALLBACK_URL "$RECEIVER/events/$1" CALLBACK_TOKEN "$TOKEN" JOB_ID "$1"
-  )"
-  BLOCK="$block" awk '/^      [A-Z_]+=/ { if (!done) { print ENVIRON["BLOCK"]; done = 1 } next } { print }' \
-    "$REPO/cloud-init/user-data.example.yaml" > "$f"
-  echo "$f"
-}
-
-# wait_scrubbed IP: the stub deletes its env file after install.sh exits, which
-# is after the final event; wait for that before looking for leaked secrets.
-wait_scrubbed() {
-  for _ in $(seq 1 30); do
-    ssh_to "$1" test ! -e /root/openclaw-install.env && return 0
+    ssh_to "$1" true 2>/dev/null && break
     sleep 5
   done
-  return 1
+  ssh_to "$1" 'command -v cloud-init >/dev/null && cloud-init status --wait >/dev/null; true'
 }
 
-wait_final() { # wait_final JOB -> prints the final event name, or "timeout"
-  local deadline=$((SECONDS + INSTALL_TIMEOUT)) final
-  while ((SECONDS < deadline)); do
-    final="$(events "$1" 2>/dev/null | jq -r '[.[] | select(.event == "succeeded" or .event == "failed")][0].event // empty')"
-    [[ -n "$final" ]] && { echo "$final"; return 0; }
-    sleep 30
-  done
-  echo timeout
+# fetch IP: clones the repository at GIT_REF to /opt/openclaw-installer.
+fetch() {
+  ssh_to "$1" bash -s <<EOF
+set -e
+command -v git >/dev/null || { command -v apt-get >/dev/null && apt-get -qq update && apt-get -qq install -y git; } || dnf -q -y install git
+rm -rf /opt/openclaw-installer
+git clone -q "$GIT_URL" /opt/openclaw-installer
+git -C /opt/openclaw-installer checkout -q "$GIT_REF"
+EOF
 }
 
-check_success() { # check_success JOB IP DISTRO
-  local job="$1" ip="$2" name="$3" seq
-  seq="$(events "$job" | jq -r '[.[] | "\(.event):\(.percent)"] | join(" ")')"
-  [[ "$seq" == "started:0 in_progress:20 in_progress:40 in_progress:60 in_progress:80 succeeded:100" ]] &&
-    pass "$name events in order" || fail "$name events: $seq"
+# run_install IP KALI_IMAGE OUT: runs the installer, keeps its output in OUT and
+# its exit code in OUT.rc.
+run_install() {
+  local rc=0
+  ssh_to "$1" "timeout $INSTALL_TIMEOUT env OPENCLAW_VERSION=$(printf %q "$OPENCLAW_VERSION") KALI_IMAGE=$(printf %q "$2") KALI_PACKAGES=$(printf %q "$KALI_PACKAGES") bash /opt/openclaw-installer/install.sh" \
+    > "$3" 2>&1 || rc=$?
+  echo "$rc" > "$3.rc"
+}
+
+markers() { grep -E '^::(progress|error) ' "$1" || true; }
+
+check_success() { # check_success OUT IP DISTRO
+  local out="$1" ip="$2" name="$3" seq
+  [[ "$(cat "$out.rc")" == 0 ]] && pass "$name install exited 0" || fail "$name install exited $(cat "$out.rc")"
+  seq="$(markers "$out" | tr '\n' '|')"
+  [[ "$seq" == "::progress 20 preflight|::progress 40 docker|::progress 60 openclaw|::progress 80 kali|::progress 100 verify|" ]] &&
+    pass "$name progress in order, no ::error" || fail "$name markers: $seq"
   ssh_to "$ip" systemctl is-active --quiet openclaw-gateway.service &&
     pass "$name gateway active" || fail "$name gateway not active"
   ssh_to "$ip" "openclaw config get agents.defaults.sandbox.mode" |
     grep -q non-main && pass "$name sandbox configured" || fail "$name sandbox config missing"
+  ssh_to "$ip" "openclaw config get gateway.controlUi.allowedOrigins" |
+    grep -qF "http://$ip:18789" && pass "$name Control UI origin is the public IPv4" || fail "$name Control UI origin is not http://$ip:18789"
   ssh_to "$ip" "runuser -u nobody -- timeout 5 bash -c '</dev/tcp/169.254.169.254/80'" 2>/dev/null &&
     fail "$name metadata reachable by non-root users" || pass "$name metadata blocked for non-root users"
-  # The callback token must not survive the install anywhere on the server.
-  wait_scrubbed "$ip" || fail "$name bootstrap env file was not removed"
-  local leaks
-  leaks="$(ssh_to "$ip" "grep -rlsF -e '$TOKEN' /etc /var/log /var/lib /home /root /opt /tmp 2>/dev/null" || true)"
-  [[ -z "$leaks" ]] && pass "$name callback token removed" || fail "$name callback token found in: $leaks"
 }
 
-run_distro() { # run_distro DISTRO -> sets IP_<distro>
-  local distro="$1" image job ip
+run_distro() { # run_distro DISTRO: create, fetch and install; output in $WORK/DISTRO.out
+  local distro="$1" image ip
   image="$(image_for "$distro")"
-  job="$RUN-$distro"
-  log "creating $job on $image"
-  ip="$(create_server "$job" "$image" "$(user_data "$job" "$KALI_IMAGE")")"
-  printf '%s %s %s\n' "$distro" "$job" "$ip" >> "$WORK/servers"
+  log "creating $RUN-$distro on $image"
+  ip="$(create_server "$RUN-$distro" "$image")"
+  printf '%s %s\n' "$distro" "$ip" >> "$WORK/servers"
+  [[ -n "$ip" && "$ip" != null ]] || return 1
+  wait_ssh "$ip" && fetch "$ip" && run_install "$ip" "$KALI_IMAGE" "$WORK/$distro.out"
 }
 
 negative_cases() { # on one distro: bad image, resume after fixing it, lock
-  local distro="$1" image job ip final
+  local distro="$1" image ip out="$WORK/bad.out"
   image="$(image_for "$distro")"
-  job="$RUN-$distro-bad"
   log "negative cases on $image"
-  ip="$(create_server "$job" "$image" "$(user_data "$job" "kalilinux/does-not-exist:none")")"
-  final="$(wait_final "$job")"
-  if [[ "$final" == failed ]] && [[ "$(events "$job" | jq -r '.[-1].phase')" == kali ]] &&
-    [[ -n "$(events "$job" | jq -r '.[-1].log_tail')" ]]; then
-    pass "bad KALI_IMAGE fails in phase kali with a log tail"
+  ip="$(create_server "$RUN-$distro-bad" "$image")"
+  wait_ssh "$ip" && fetch "$ip"
+  run_install "$ip" "kalilinux/does-not-exist:none" "$out"
+  if [[ "$(cat "$out.rc")" != 0 ]] && [[ "$(markers "$out" | grep -c '^::error ')" == 1 ]] &&
+    markers "$out" | grep -q "^::error phase 'kali'"; then
+    pass "bad KALI_IMAGE fails in phase kali with one ::error"
   else
-    fail "bad KALI_IMAGE: final=$final last=$(events "$job" | jq -c '.[-1]')"
+    fail "bad KALI_IMAGE: rc=$(cat "$out.rc") markers=$(markers "$out" | tr '\n' '|')"
   fi
 
-  # Re-run by hand with the image fixed; secrets go over ssh stdin, not argv.
-  local env="OPENCLAW_VERSION=$OPENCLAW_VERSION KALI_IMAGE=$KALI_IMAGE KALI_PACKAGES='$KALI_PACKAGES' CALLBACK_URL=$RECEIVER/events/$job-resume JOB_ID=$job-resume"
-  printf 'export CALLBACK_TOKEN=%q\nexport %s\nbash /opt/openclaw-installer/install.sh\n' \
-    "$TOKEN" "$env" > "$WORK/resume.sh"
-  # Two runs at once: the second must be refused by the lock.
-  ssh_to "$ip" bash -s < "$WORK/resume.sh" > "$WORK/resume.log" 2>&1 &
+  # Two runs at once with the image fixed: the second must be refused by the lock.
+  run_install "$ip" "$KALI_IMAGE" "$WORK/resume.out" &
   local first=$!
   sleep 5
-  if ssh_to "$ip" bash -s < "$WORK/resume.sh" 2>&1 | grep -q "already running"; then
-    pass "a concurrent run is refused"
+  run_install "$ip" "$KALI_IMAGE" "$WORK/second.out"
+  if grep -q "already running" "$WORK/second.out" && [[ -z "$(markers "$WORK/second.out")" ]]; then
+    pass "a concurrent run is refused without ::error"
   else
-    fail "a concurrent run was not refused"
+    fail "a concurrent run was not refused cleanly"
   fi
   wait "$first" || true
-  # Skipped phases still report their percentage, so check the log for what ran.
+  # Skipped phases still print their progress, so check the log for what ran.
   local skipped
   skipped="$(ssh_to "$ip" "grep -o 'phase [a-z]*: already done' /var/log/openclaw-install.log | sort -u | cut -d' ' -f2 | tr -d : | tr '\\n' ' '")"
   [[ "$skipped" == "docker openclaw preflight " ]] && pass "re-run skips the finished phases" || fail "re-run skipped: '$skipped'"
-  [[ "$(events "$job-resume" | jq -r '.[-1].event')" == succeeded ]] && pass "re-run succeeds" || fail "re-run did not succeed"
+  [[ "$(cat "$WORK/resume.out.rc")" == 0 ]] && pass "re-run succeeds" || fail "re-run exited $(cat "$WORK/resume.out.rc")"
   # Runs in the background, so report through the exit code.
   ((FAILURES == 0))
 }
@@ -220,22 +183,26 @@ main() {
   ((${#distros[@]})) || distros=(debian ubuntu rocky alma centos-stream fedora)
   ssh-keygen -q -t ed25519 -N '' -f "$WORK/id"
   hcloud ssh-key create --name "$RUN" --public-key-from-file "$WORK/id.pub" --label "run=$RUN" >/dev/null
-  start_receiver
   : > "$WORK/servers"
-  local d
-  for d in "${distros[@]}"; do run_distro "$d"; done
+  local d pids=()
+  for d in "${distros[@]}"; do run_distro "$d" & pids+=($!); sleep 2; done
+  # A distro whose image or server could not be created never reaches the
+  # servers file; count it instead of letting the run pass without it.
+  local recorded
   negative_cases "${distros[0]}" &
   local negative=$!
+  wait "${pids[@]}" || true
+  for d in "${distros[@]}"; do
+    recorded="$(cut -d' ' -f1 "$WORK/servers" | grep -cx "$d" || true)"
+    ((recorded > 0)) || fail "$d: no server was created (image or hcloud error)"
+  done
 
-  local distro job ip final
-  while read -r distro job ip; do
-    final="$(wait_final "$job")"
-    if [[ "$final" == succeeded ]]; then
-      pass "$distro install succeeded"
-      check_success "$job" "$ip" "$distro"
+  local distro ip
+  while read -r distro ip; do
+    if [[ -f "$WORK/$distro.out.rc" ]]; then
+      check_success "$WORK/$distro.out" "$ip" "$distro"
     else
-      fail "$distro install ended with '$final'"
-      events "$job" | jq -c '.[-1]' || true
+      fail "$distro never ran the installer (SSH or clone failed)"
     fi
   done < "$WORK/servers"
   wait "$negative" || FAILURES=$((FAILURES + 1))

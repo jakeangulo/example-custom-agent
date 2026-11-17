@@ -1,0 +1,45 @@
+# example-marscape.yaml: every field a marscape.yaml manifest can have.
+# Copy it to marscape.yaml at the root of your repository and edit it.
+#
+# The install script contract:
+#   - It runs as root, with the parameters below as environment variables.
+#   - Exit code 0 means installed and working; any other code is a failure,
+#     except install.reboot_exit_code, which means "reboot the machine and run me again".
+#   - It must be safe to run again after a failure or a reboot (skip finished work).
+#   - It may print "::progress <percent> <phase>" lines (percent 0-100) and, on
+#     failure, one "::error <message>" line on stdout. Everything else is the log.
+#   - It must never print a secret parameter's value.
+
+schema_version: 1                 # required; always 1 for this format
+name: my-software                 # required; short identifier, lowercase and dashes
+description: What gets installed. # required; one sentence shown to users
+
+install:
+  script: install.sh              # required; path from the repository root
+  expected_duration_minutes: 15   # required; the install is stopped after twice this
+  reboot_exit_code: 194           # optional (default 194); exit code that asks for a reboot
+  max_retries: 2                  # optional; may only lower the platform's retry count
+
+params:                           # optional; one entry per environment variable
+  - name: APP_VERSION             # required; UPPER_SNAKE_CASE
+    description: Version to install
+    required: true                # optional (default false)
+    default: "1.0.0"              # optional; used when the request gives no value
+    pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'  # optional; the value must match this regex
+  - name: APP_LICENSE_KEY
+    description: License key, never printed or stored by the script
+    required: false
+    secret: true                  # optional (default false); passed only in the environment, never logged
+
+os:                               # required; <distro>-<version> the script supports
+  - debian-12
+  - ubuntu-24.04
+
+machine:
+  minimum: { vcpus: 1, memory_gb: 2, disk_gb: 20 }   # required; smaller requests are refused
+  default: { vcpus: 2, memory_gb: 4, disk_gb: 40 }   # optional; used when the request names no size
+
+ports:                            # optional; ports a request may open to its own source IPs (SSH is always allowed)
+  - port: 8080
+    protocol: tcp                 # tcp or udp
+    description: Web UI

@@ -5,7 +5,6 @@
 
 OPENCLAW_INSTALLER_URL="https://openclaw.ai/install.sh"
 GATEWAY_PORT=18789
-PUBLIC_IPV4_URL="http://169.254.169.254/hetzner/v1/metadata/public-ipv4"
 
 phase_openclaw() {
   install_openclaw
@@ -57,13 +56,19 @@ onboard_openclaw() {
 }
 
 # The Control UI only accepts browsers from listed origins; a LAN bind needs
-# the address users type. Runs every time, so a re-run fixes a changed IP.
+# the address users type. A re-run with a new PUBLIC_HOST redoes the phase.
 # shortcut: IPv4 only, plain HTTP; add the IPv6 origin or a TLS front when needed.
+# allow_control_ui_origin: the Control UI is reached at PUBLIC_HOST, or else at
+# the IPv4 address of the default route (the public address on a typical
+# cloud server). Behind NAT, set PUBLIC_HOST.
 allow_control_ui_origin() {
-  local ip
-  ip="$(curl -fsS --max-time 5 "$PUBLIC_IPV4_URL")" || die "could not read the public IPv4 from $PUBLIC_IPV4_URL"
-  [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || die "the metadata service returned no IPv4 address"
-  CONTROL_UI_URL="http://$ip:$GATEWAY_PORT"
+  local host="${PUBLIC_HOST:-}"
+  if [[ -z "$host" ]]; then
+    host="$(ip -4 -o route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')" || host=""
+    [[ "$host" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] ||
+      die "could not find this machine's IPv4 address on the default route; set PUBLIC_HOST"
+  fi
+  CONTROL_UI_URL="http://$host:$GATEWAY_PORT"
   "$OPENCLAW_BIN" config set gateway.controlUi.allowedOrigins "[\"$CONTROL_UI_URL\"]" --strict-json
   log "Control UI: $CONTROL_UI_URL"
 }
